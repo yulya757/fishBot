@@ -1,0 +1,74 @@
+[fla.utils._device|WARNING]Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+==((====))==  Unsloth 2026.8.15: Fast Qwen3_5 patching. Transformers: 5.5.0.
+   \\   /|    NVIDIA GeForce RTX 3080. Num GPUs = 1. Max memory: 10.0 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.11.0+cu130. CUDA: 8.6. CUDA Toolkit: 13.0. Triton: 3.6.0
+\        /    Bfloat16 = TRUE. FA [Xformers = None. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
+The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/723 [00:00<?, ?it/s]Loading weights:   0%|          | 1/723 [00:02<31:25,  2.61s/it]Loading weights:   1%|          | 6/723 [00:02<04:28,  2.67it/s]Loading weights:   1%|          | 8/723 [00:03<03:12,  3.72it/s]Loading weights:   2%|▏         | 12/723 [00:03<01:52,  6.30it/s]Loading weights:   2%|▏         | 14/723 [00:03<01:38,  7.17it/s]Loading weights:   3%|▎         | 22/723 [00:03<00:45, 15.44it/s]Loading weights:   4%|▎         | 26/723 [00:03<00:41, 16.80it/s]Loading weights:   4%|▍         | 29/723 [00:03<00:42, 16.51it/s]Loading weights:   5%|▍         | 36/723 [00:04<00:33, 20.54it/s]Loading weights:   6%|▌         | 40/723 [00:04<00:37, 18.18it/s]Loading weights:   6%|▌         | 43/723 [00:04<00:40, 16.75it/s]Loading weights:   6%|▌         | 45/723 [00:04<00:52, 13.03it/s]Loading weights:  11%|█         | 78/723 [00:05<00:11, 56.99it/s]Loading weights:  12%|█▏        | 89/723 [00:05<00:14, 43.41it/s]Loading weights:  14%|█▎        | 98/723 [00:05<00:18, 32.94it/s]Loading weights:  15%|█▍        | 105/723 [00:06<00:19, 30.94it/s]Loading weights:  15%|█▌        | 111/723 [00:06<00:17, 34.17it/s]Loading weights:  16%|█▌        | 117/723 [00:06<00:17, 33.90it/s]Loading weights:  17%|█▋        | 122/723 [00:06<00:21, 28.25it/s]Loading weights:  18%|█▊        | 131/723 [00:06<00:17, 34.29it/s]Loading weights:  19%|█▉        | 136/723 [00:07<00:21, 27.81it/s]Loading weights:  20%|█▉        | 142/723 [00:07<00:18, 30.61it/s]Loading weights:  20%|██        | 146/723 [00:07<00:20, 28.56it/s]Loading weights:  21%|██        | 150/723 [00:07<00:21, 26.17it/s]Loading weights:  21%|██        | 153/723 [00:08<00:27, 20.74it/s]Loading weights:  22%|██▏       | 159/723 [00:08<00:21, 26.05it/s]Loading weights:  23%|██▎       | 168/723 [00:08<00:16, 34.60it/s]Loading weights:  24%|██▍       | 172/723 [00:08<00:19, 27.94it/s]Loading weights:  24%|██▍       | 176/723 [00:08<00:18, 29.41it/s]Loading weights:  25%|██▌       | 182/723 [00:08<00:16, 33.12it/s]Loading weights:  26%|██▌       | 186/723 [00:09<00:19, 27.58it/s]Loading weights:  26%|██▋       | 190/723 [00:09<00:17, 29.72it/s]Loading weights:  27%|██▋       | 196/723 [00:09<00:15, 33.98it/s]Loading weights:  28%|██▊       | 200/723 [00:09<00:19, 26.80it/s]Loading weights:  28%|██▊       | 204/723 [00:09<00:20, 25.65it/s]Loading weights:  29%|██▊       | 207/723 [00:09<00:23, 21.67it/s]Loading weights:  29%|██▉       | 212/723 [00:10<00:20, 25.31it/s]Loading weights:  30%|███       | 220/723 [00:10<00:14, 35.23it/s]Loading weights:  31%|███       | 225/723 [00:10<00:17, 28.52it/s]Loading weights:  32%|███▏      | 234/723 [00:10<00:14, 33.97it/s]Loading weights:  33%|███▎      | 238/723 [00:10<00:16, 29.82it/s]Loading weights:  33%|███▎      | 242/723 [00:10<00:18, 26.34it/s]Loading weights:  34%|███▍      | 248/723 [00:11<00:15, 31.64it/s]Loading weights:  35%|███▍      | 252/723 [00:11<00:16, 27.72it/s]Loading weights:  35%|███▌      | 256/723 [00:11<00:18, 24.84it/s]Loading weights:  36%|███▌      | 259/723 [00:11<00:24, 18.95it/s]Loading weights:  37%|███▋      | 265/723 [00:11<00:18, 24.64it/s]Loading weights:  38%|███▊      | 274/723 [00:12<00:13, 34.32it/s]Loading weights:  39%|███▊      | 279/723 [00:12<00:17, 25.92it/s]Loading weights:  40%|███▉      | 288/723 [00:12<00:12, 33.95it/s]Loading weights:  41%|████      | 293/723 [00:12<00:16, 26.15it/s]Loading weights:  42%|████▏     | 301/723 [00:12<00:12, 33.14it/s]Loading weights:  42%|████▏     | 306/723 [00:13<00:15, 26.09it/s]Loading weights:  43%|████▎     | 310/723 [00:13<00:17, 23.99it/s]Loading weights:  43%|████▎     | 313/723 [00:13<00:18, 21.62it/s]Loading weights:  44%|████▍     | 318/723 [00:13<00:16, 24.31it/s]Loading weights:  45%|████▌     | 326/723 [00:13<00:11, 33.76it/s]Loading weights:  46%|████▌     | 331/723 [00:14<00:15, 25.63it/s]Loading weights:  46%|████▋     | 335/723 [00:14<00:13, 27.85it/s]Loading weights:  47%|████▋     | 341/723 [00:14<00:12, 31.27it/s]Loading weights:  48%|████▊     | 345/723 [00:14<00:14, 26.49it/s]Loading weights:  48%|████▊     | 349/723 [00:14<00:13, 27.82it/s]Loading weights:  49%|████▉     | 355/723 [00:15<00:11, 31.71it/s]Loading weights:  50%|████▉     | 359/723 [00:15<00:14, 24.80it/s]Loading weights:  50%|█████     | 363/723 [00:15<00:14, 24.37it/s]Loading weights:  51%|█████     | 366/723 [00:15<00:16, 21.28it/s]Loading weights:  51%|█████▏    | 371/723 [00:15<00:14, 25.12it/s]Loading weights:  53%|█████▎    | 380/723 [00:15<00:09, 35.92it/s]Loading weights:  53%|█████▎    | 385/723 [00:16<00:12, 27.33it/s]Loading weights:  54%|█████▍    | 394/723 [00:16<00:09, 35.62it/s]Loading weights:  55%|█████▌    | 399/723 [00:16<00:10, 31.46it/s]Loading weights:  56%|█████▋    | 408/723 [00:16<00:08, 39.27it/s]Loading weights:  57%|█████▋    | 413/723 [00:17<00:10, 28.79it/s]Loading weights:  58%|█████▊    | 417/723 [00:17<00:12, 25.17it/s]Loading weights:  59%|█████▊    | 424/723 [00:17<00:09, 30.61it/s]Loading weights:  62%|██████▏   | 451/723 [00:17<00:03, 68.39it/s]Loading weights:  64%|██████▍   | 463/723 [00:17<00:03, 70.61it/s]Loading weights:  66%|██████▋   | 480/723 [00:17<00:02, 87.68it/s]Loading weights:  71%|███████   | 514/723 [00:17<00:01, 134.96it/s]Loading weights:  75%|███████▍  | 542/723 [00:18<00:01, 159.51it/s]Loading weights:  79%|███████▉  | 574/723 [00:18<00:00, 196.67it/s]Loading weights:  83%|████████▎ | 600/723 [00:18<00:00, 199.06it/s]Loading weights:  86%|████████▋ | 624/723 [00:18<00:00, 207.11it/s]Loading weights:  90%|████████▉ | 648/723 [00:18<00:00, 213.56it/s]Loading weights:  95%|█████████▍| 686/723 [00:18<00:00, 257.55it/s]Loading weights:  99%|█████████▉| 717/723 [00:18<00:00, 271.78it/s]Loading weights: 100%|██████████| 723/723 [00:18<00:00, 38.54it/s] 
+Unsloth: Dropout = 0 is supported for fast patching. You are using dropout = 0.05.
+Unsloth will patch all other layers, except LoRA matrices, causing a performance hit.
+Map:   0%|          | 0/486 [00:00<?, ? examples/s]Map:  70%|██████▉   | 338/486 [00:00<00:00, 3350.89 examples/s]Map: 100%|██████████| 486/486 [00:00<00:00, 3570.97 examples/s]
+Map:   0%|          | 0/54 [00:00<?, ? examples/s]Map: 100%|██████████| 54/54 [00:00<00:00, 3830.67 examples/s]
+warmup_ratio is deprecated and will be removed in v5.2. Use `warmup_steps` instead.
+=== Пример отрендеренного текста (проверка шаблона) ===
+<|im_start|>system
+Ты — Настя. Ты переписываешься в Telegram с человеком по имени Fart. Отвечай коротко и естественно, так, как обычно пишешь в личных сообщениях.<|im_end|>
+<|im_start|>user
+Знаю знаю
+У меня там друзья<|im_end|>
+<|im_start|>assistant
+оо прикол<|im_end|>
+<|im_start|>user
+Так что, погнали?
+😎🚀🚀🚀<|im_end|>
+<|im_start|>assistant
+я завтра улетаю
+хаха<|im_end|>
+<|im_start|>user
+Йоууу
+А куда
+Во сколько<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+на 14 дней<|im_end|>
+
+========================================================
+Unsloth: reducing dataset_num_proc 8 -> 6 to fit free memory (~1GB per worker). Set UNSLOTH_DATASET_NUM_PROC to override.
+Unsloth: Tokenizing ["text"] (num_proc=6):   0%|          | 0/486 [00:00<?, ? examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  17%|█▋        | 81/486 [00:01<00:06, 65.97 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  33%|███▎      | 162/486 [00:01<00:02, 131.39 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  50%|█████     | 243/486 [00:01<00:01, 201.95 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  67%|██████▋   | 324/486 [00:01<00:00, 277.12 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  83%|████████▎ | 405/486 [00:01<00:00, 339.53 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6): 100%|██████████| 486/486 [00:01<00:00, 396.92 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6): 100%|██████████| 486/486 [00:02<00:00, 236.32 examples/s]
+Unsloth: Tokenizing ["text"] (num_proc=6):   0%|          | 0/54 [00:00<?, ? examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  17%|█▋        | 9/54 [00:01<00:05,  8.19 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  33%|███▎      | 18/54 [00:01<00:02, 16.95 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  50%|█████     | 27/54 [00:01<00:01, 24.81 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  67%|██████▋   | 36/54 [00:01<00:00, 33.36 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6):  83%|████████▎ | 45/54 [00:01<00:00, 37.80 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6): 100%|██████████| 54/54 [00:01<00:00, 37.65 examples/s]Unsloth: Tokenizing ["text"] (num_proc=6): 100%|██████████| 54/54 [00:00<00:00, 74.94 examples/s]
+Map:   0%|          | 0/486 [00:00<?, ? examples/s]Map: 100%|██████████| 486/486 [00:00<00:00, 21956.63 examples/s]
+Map:   0%|          | 0/54 [00:00<?, ? examples/s]Map: 100%|██████████| 54/54 [00:00<00:00, 4052.32 examples/s]
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'eos_token_id': 248046}.
+==((====))==  Unsloth - 2x faster free finetuning | Num GPUs used = 1
+   \\   /|    Num examples = 486 | Num Epochs = 1 | Total steps = 61
+O^O/ \_/ \    Batch size per device = 1 | Gradient accumulation steps = 8
+\        /    Data Parallel GPUs = 1 | Total batch size (1 x 8 x 1) = 8
+ "-____-"     Trainable parameters = 21,233,664 of 4,560,499,200 (0.47% trained)
+>>> Старт с нуля
+{'loss': '3.439', 'grad_norm': '2.841', 'learning_rate': '9.972e-05', 'epoch': '0.0823'}
+{'loss': '3.055', 'grad_norm': '2.443', 'learning_rate': '9.657e-05', 'epoch': '0.1646'}
+{'loss': '2.676', 'grad_norm': '2.273', 'learning_rate': '9.014e-05', 'epoch': '0.2469'}
+{'loss': '2.736', 'grad_norm': '2.9', 'learning_rate': '8.088e-05', 'epoch': '0.3292'}
+{'loss': '2.551', 'grad_norm': '2.313', 'learning_rate': '6.944e-05', 'epoch': '0.4115'}
+{'loss': '2.62', 'grad_norm': '2.405', 'learning_rate': '5.664e-05', 'epoch': '0.4938'}
+{'loss': '2.358', 'grad_norm': '2.649', 'learning_rate': '4.336e-05', 'epoch': '0.5761'}
+{'loss': '2.651', 'grad_norm': '2.162', 'learning_rate': '3.056e-05', 'epoch': '0.6584'}
+{'loss': '2.487', 'grad_norm': '2.545', 'learning_rate': '1.912e-05', 'epoch': '0.7407'}
+{'loss': '2.527', 'grad_norm': '2.13', 'learning_rate': '9.864e-06', 'epoch': '0.823'}
+Filter:   0%|          | 0/54 [00:00<?, ? examples/s]Filter: 100%|██████████| 54/54 [00:00<00:00, 11842.12 examples/s]
+Unsloth: Restored added_tokens_decoder metadata in /home/abc/tgstyle/out/checkpoint-50/tokenizer_config.json.
+Unsloth: Restored added_tokens_decoder metadata in /home/abc/tgstyle/out/checkpoint-61/tokenizer_config.json.
+Unsloth: Restored added_tokens_decoder metadata in /mnt/d/FISHBOT/lora_v2/tokenizer_config.json.
+{'eval_loss': '2.223', 'eval_runtime': '8.398', 'eval_samples_per_second': '6.43', 'eval_steps_per_second': '6.43', 'epoch': '0.823'}
+{'loss': '2.296', 'grad_norm': '2.091', 'learning_rate': '3.433e-06', 'epoch': '0.9053'}
+{'loss': '2.426', 'grad_norm': '3.03', 'learning_rate': '2.833e-07', 'epoch': '0.9877'}
+{'eval_loss': '2.216', 'eval_runtime': '6.318', 'eval_samples_per_second': '8.547', 'eval_steps_per_second': '8.547', 'epoch': '1'}
+{'train_runtime': '326.1', 'train_samples_per_second': '1.491', 'train_steps_per_second': '0.187', 'train_loss': '2.649', 'epoch': '1'}
+Готово. LoRA сохранена в: /mnt/d/FISHBOT/lora_v2

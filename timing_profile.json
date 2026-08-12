@@ -1,0 +1,140 @@
+{
+  "0": {
+    "count": 63,
+    "median_sec": 105,
+    "p25_sec": 17,
+    "p75_sec": 879
+  },
+  "1": {
+    "count": 82,
+    "median_sec": 31,
+    "p25_sec": 9,
+    "p75_sec": 179
+  },
+  "2": {
+    "count": 20,
+    "median_sec": 64,
+    "p25_sec": 26,
+    "p75_sec": 1216
+  },
+  "3": {
+    "count": 4,
+    "median_sec": 20,
+    "p25_sec": 8,
+    "p75_sec": 1732
+  },
+  "4": {
+    "count": 0
+  },
+  "5": {
+    "count": 0
+  },
+  "6": {
+    "count": 5,
+    "median_sec": 19,
+    "p25_sec": 11,
+    "p75_sec": 72
+  },
+  "7": {
+    "count": 1,
+    "median_sec": 9126,
+    "p25_sec": 9126,
+    "p75_sec": 9126
+  },
+  "8": {
+    "count": 6,
+    "median_sec": 142,
+    "p25_sec": 10,
+    "p75_sec": 492
+  },
+  "9": {
+    "count": 4,
+    "median_sec": 106,
+    "p25_sec": 3,
+    "p75_sec": 4415
+  },
+  "10": {
+    "count": 25,
+    "median_sec": 31,
+    "p25_sec": 8,
+    "p75_sec": 59
+  },
+  "11": {
+    "count": 7,
+    "median_sec": 953,
+    "p25_sec": 17,
+    "p75_sec": 1843
+  },
+  "12": {
+    "count": 40,
+    "median_sec": 32,
+    "p25_sec": 18,
+    "p75_sec": 103
+  },
+  "13": {
+    "count": 96,
+    "median_sec": 50,
+    "p25_sec": 12,
+    "p75_sec": 403
+  },
+  "14": {
+    "count": 117,
+    "median_sec": 52,
+    "p25_sec": 17,
+    "p75_sec": 389
+  },
+  "15": {
+    "count": 72,
+    "median_sec": 303,
+    "p25_sec": 30,
+    "p75_sec": 2547
+  },
+  "16": {
+    "count": 158,
+    "median_sec": 22,
+    "p25_sec": 8,
+    "p75_sec": 182
+  },
+  "17": {
+    "count": 136,
+    "median_sec": 20,
+    "p25_sec": 7,
+    "p75_sec": 195
+  },
+  "18": {
+    "count": 61,
+    "median_sec": 307,
+    "p25_sec": 10,
+    "p75_sec": 2262
+  },
+  "19": {
+    "count": 92,
+    "median_sec": 26,
+    "p25_sec": 8,
+    "p75_sec": 526
+  },
+  "20": {
+    "count": 79,
+    "median_sec": 90,
+    "p25_sec": 16,
+    "p75_sec": 1967
+  },
+  "21": {
+    "count": 39,
+    "median_sec": 265,
+    "p25_sec": 12,
+    "p75_sec": 1123
+  },
+  "22": {
+    "count": 112,
+    "median_sec": 42,
+    "p25_sec": 10,
+    "p75_sec": 542
+  },
+  "23": {
+    "count": 84,
+    "median_sec": 50,
+    "p25_sec": 18,
+    "p75_sec": 284
+  }
+}
