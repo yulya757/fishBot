@@ -2,7 +2,9 @@
 #   pip install -r requirements.txt
 ijson>=3.5
 httpx>=0.27
-python-telegram-bot>=21
+aiogram>=3.29
+openai>=2.0
+python-dotenv>=1.0
 
 # Обучение и инференс ставятся отдельно — unsloth сам подтянет
 # совместимые torch / transformers / trl / peft / datasets:

@@ -5,16 +5,14 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ChatAction
-import httpx
-from openai import AsyncOpenAI
 import database
+from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND
 from datetime import datetime, timedelta
 import random
 
 # Загружаем ключи из .env
 load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
 
 # Кеш для разрешенных чатов
@@ -28,16 +26,6 @@ LAST_USER_MESSAGE_TIME = {}    # {chat_id: datetime} - когда юзер пи�
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-
-http_client = httpx.AsyncClient(
-    trust_env=True,  # Подтягивает настройки системного VPN/прокси Windows
-    timeout=60.0     # Увеличиваем таймаут, чтобы VPN успевал ответить
-)
-
-ai_client = AsyncOpenAI(
-    api_key=OPENAI_API_KEY,
-    http_client=http_client
-)
 
 # Загрузка системного промпта
 try:
@@ -55,59 +43,6 @@ USER_MESSAGE_BUFFERS = {}
 USER_MESSAGE_TASKS = {}
 DEBOUNCE_TIME = 2.0 
 MAX_WAIT_TIME = 7.0 
-
-# Описание инструмента для OpenAI
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "update_profile_data",
-            "description": "Обновляет сводку беседы и статус готовности клиента к покупке.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "summary": {
-                        "type": "string",
-                        "description": "Краткая сводка беседы с клиентом (1-2 предложения)."
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["new", "cold", "warm", "ready", "rejected"],
-                        "description": "Текущий статус готовности клиента к покупке."
-                    }
-                },
-                "required": ["summary", "status"],
-                "additionalProperties": False  # Для использования с strict=True
-            },
-            "strict": True
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "change_activity",
-            "description": "Используй, если идешь спать, работать, гулять или в душ. Блокирует твои ответы.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "activity": {
-                        "type": "string",
-                        "description": "Что ты идешь делать (например: 'сон', 'душ', 'работа')."
-                    },
-                    "minutes": {
-                        "type": "integer",
-                        "description": "На сколько минут ты уходишь. Для сна ставь 480-600, для душа 20-40."
-                    },
-                    "promise_to_return": {
-                        "type": "boolean",
-                        "description": "True - если ты хочешь написать первой после возвращения (например, 'я вышла из душа' или утреннее 'доброе утро'). False - если диалог логически завершен и писать первой не надо."
-                    }
-                },
-                "required": ["activity", "minutes", "promise_to_return"]
-            }
-        }
-    }
-]
 
 async def send_admin_message(message_text: str):
     """Отправляет сообщение администратору напрямую в бота."""
@@ -135,24 +70,20 @@ async def trigger_proactive_ai(chat_id: int, context_prompt: str):
         return
 
     # 2. Формируем запрос
+    dynamic_extra = context_prompt
     recent_msgs = database.get_recent_messages(chat_id, limit=8)
-    messages_for_ai = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context_prompt}]
-    
-    for msg in recent_msgs:
-        role = "assistant" if msg[0] == "me" else "user"
-        messages_for_ai.append({"role": role, "content": msg[1]})
-        
+    history_pairs = [
+        {"role": "assistant" if msg[0] == "me" else "user", "content": msg[1]}
+        for msg in recent_msgs
+    ]
+    messages_for_ai = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + dynamic_extra}] + history_pairs
+
     try:
-        # 3. Делаем запрос в OpenAI
-        response = await ai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages_for_ai,
-            tools=TOOLS,
-            max_tokens=150
+        # 3. Делаем запрос к активному бэкенду (OpenAI или локальная модель)
+        ai_reply, _tool_calls, _tool_decision_failed = await generate_reply(
+            messages_for_ai, dynamic_extra, history_pairs
         )
-        
-        ai_reply = response.choices[0].message.content
-        
+
         # 4. Сохраняем в БД и отправляем
         if ai_reply:
             database.save_message(chat_id, "me", ai_reply)
@@ -220,30 +151,39 @@ async def generate_and_save_summary(chat_id: int):
         print(f"Ошибка при генерации сводки для чата {chat_id}: {e}")
 
 async def get_ai_response(chat_id: int):
-    """Формирует контекст и делает запрос к OpenAI (gpt-4o)."""
+    """Формирует контекст и запрашивает ответ у активного бэкенда (OpenAI или локальная модель)."""
     # Узнаем текущее время
     current_time = datetime.now().strftime("%H:%M")
-    dynamic_prompt = SYSTEM_PROMPT + f"\n\n[СИСТЕМНОЕ ВРЕМЯ СЕЙЧАС: {current_time}. Если сейчас от 00:00 до 02:00, и диалог логически завершен, попрощайся (пожелай спокойной ночи) и ВЫЗОВИ функцию change_activity на 480-600 минут. Если ты идешь работать или в душ, тоже вызови эту функцию.]"
-    messages_for_ai = [{"role": "system", "content": dynamic_prompt}]
+    dynamic_extra = f"[СИСТЕМНОЕ ВРЕМЯ СЕЙЧАС: {current_time}. Если сейчас от 00:00 до 02:00, и диалог логически завершен, попрощайся (пожелай спокойной ночи) и ВЫЗОВИ функцию change_activity на 480-600 минут. Если ты идешь работать или в душ, тоже вызови эту функцию.]"
 
     profile_summary = database.get_profile_summary(chat_id)
     if profile_summary:
-        messages_for_ai.append({"role": "system", "content": f"[Предыдущая сводка беседы с этим клиентом: {profile_summary}]"})
+        dynamic_extra += f"\n\n[Предыдущая сводка беседы с этим клиентом: {profile_summary}]"
+
+    messages_for_ai = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + dynamic_extra}]
 
     recent_msgs = database.get_recent_messages(chat_id, limit=8)
-    for msg in recent_msgs:
-        role = "assistant" if msg[0] == "me" else "user"
-        messages_for_ai.append({"role": role, "content": msg[1]})
+    history_pairs = [
+        {"role": "assistant" if msg[0] == "me" else "user", "content": msg[1]}
+        for msg in recent_msgs
+    ]
+    messages_for_ai.extend(history_pairs)
 
-    response = await ai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages_for_ai,
-        tools=TOOLS, # <--- Добавили инструменты сюда
-        max_tokens=150
-    )
-        
-    msg = response.choices[0].message
-    return msg.content, msg.tool_calls
+    try:
+        content, tool_calls, tool_decision_failed = await generate_reply(
+            messages_for_ai, dynamic_extra, history_pairs
+        )
+    except Exception as e:
+        print(f"Ошибка при получении ответа ИИ для чата {chat_id}: {e}")
+        await send_admin_message(f"Ошибка при получении ответа ИИ для чата {chat_id}: {e}")
+        return None, None
+
+    if tool_decision_failed:
+        await send_admin_message(
+            f"Для чата {chat_id}: статус/активность не обновились (сбой decide_tools), но ответ отправлен."
+        )
+
+    return content, tool_calls
 
 
 async def split_and_send_messages(chat_id: int, text: str, biz_conn_id: str, reply_to_msg_id: int = None):
@@ -489,7 +429,7 @@ async def main():
     # ЗАПУСКАЕМ ФОНОВУЮ ИНИЦИАТИВУ
     asyncio.create_task(initiative_worker())
 
-    print("Бот успешно запущен в режиме Telegram Business на моделях OpenAI!")
+    print(f"Бот успешно запущен в режиме Telegram Business. Инференс: {INFERENCE_BACKEND}.")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
