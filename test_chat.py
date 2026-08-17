@@ -70,6 +70,10 @@ while True:
             line = input(f"{contact}> ")
         except (EOFError, KeyboardInterrupt):
             line = "/q"
+        # Терминал WSL иногда рвёт многобайтовые UTF-8 символы при быстром вводе —
+        # Python прячет повреждённый байт в суррогат вместо ошибки, а токенизатор
+        # такую строку не переваривает. Восстанавливаем байты и выкидываем мусор.
+        line = line.encode("utf-8", "surrogateescape").decode("utf-8", "ignore")
         if line.strip() == "/q":
             sys.exit(0)
         if line.strip() == "":
@@ -80,38 +84,50 @@ while True:
 
     messages.append({"role": "user", "content": "\n".join(lines)})
 
-    prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True,
-        enable_thinking=False,  # пустой <think></think>, как в обучающих данных
-    )
-    if not isinstance(prompt, str):
-        # Если метод вернул список ID токенов вместо текста — декодируем его обратно
-        if isinstance(prompt, list) and prompt and isinstance(prompt[0], int):
-            prompt = tok.decode(prompt)
-        elif isinstance(prompt, (list, tuple)) and prompt:
-            prompt = "".join(str(p) for p in prompt)
-        else:
-            prompt = str(prompt)
+    try:
+        prompt = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+            enable_thinking=False,  # пустой <think></think>, как в обучающих данных
+        )
+        if not isinstance(prompt, str):
+            # Если метод вернул список ID токенов вместо текста — декодируем его обратно
+            if isinstance(prompt, list) and prompt and isinstance(prompt[0], int):
+                prompt = tok.decode(prompt)
+            elif isinstance(prompt, (list, tuple)) and prompt:
+                prompt = "".join(str(p) for p in prompt)
+            else:
+                prompt = str(prompt)
 
-    inputs = tok(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
+        inputs = tok(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
 
-    print(f"{MY_NAME}: ", end="", flush=True)
-    out = model.generate(
-        **inputs,
-        max_new_tokens=200,
-        temperature=0.4,
-        top_p=0.8,         # меньше словесного салата, чем 0.7/0.9
-        repetition_penalty=1.05,
-        do_sample=True,
-        eos_token_id=im_end,
-        pad_token_id=im_end,
-        streamer=streamer,
-    )
-    prompt_len = inputs["input_ids"].shape[1]
-    reply = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
-    reply = clean_reply(reply)
-    messages.append({"role": "assistant", "content": reply})
-    print()
+        print(f"{MY_NAME}: ", end="", flush=True)
+        out = model.generate(
+            **inputs,
+            max_new_tokens=200,
+            temperature=0.4,
+            top_p=0.8,         # меньше словесного салата, чем 0.7/0.9
+            repetition_penalty=1.05,
+            do_sample=True,
+            eos_token_id=im_end,
+            pad_token_id=im_end,
+            streamer=streamer,
+        )
+        prompt_len = inputs["input_ids"].shape[1]
+        reply = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
+        reply = clean_reply(reply)
+        messages.append({"role": "assistant", "content": reply})
+        print()
+    except Exception as e:
+        # Не роняем всю сессию из-за одного сбойного хода — печатаем диагностику
+        # и убираем реплику пользователя, иначе она будет ломать каждый следующий
+        # рендер шаблона (prompt так и не превратился в валидный текст).
+        print(f"\n[ошибка генерации: {e!r}]")
+        try:
+            print(f"[debug: type(prompt)={type(prompt).__name__}, prompt={repr(prompt)[:300]}]")
+        except NameError:
+            pass
+        messages.pop()
+        continue
 
     # не даём контексту расти бесконечно
     if len(messages) > 21:

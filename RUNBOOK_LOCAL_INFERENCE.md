@@ -24,12 +24,15 @@
 
 1. `pip install unsloth` (подтянет совместимые `torch`/`transformers`/`trl`/`peft`), затем `pip install -r requirements.txt`.
 2. Перенести репозиторий целиком, включая `lora_v2/`, `system_promt.txt`, `.env`.
-3. Сначала проверенный путь без HTTP-сервера: `python smoke_test.py`, затем `python test_chat.py` — убедиться, что голос корректный и без утечек `<think>`.
-4. Запустить `python serve_model.py` — должен стартовать без исключений и написать `Сервер готов: http://127.0.0.1:8008/reply`.
+3. Сначала проверенный путь без HTTP-сервера: `python3 smoke_test.py`, затем `python3 test_chat.py` — убедиться, что голос корректный и без утечек `<think>`.
+4. Запустить `python3 serve_model.py` — должен стартовать без исключений и написать `Сервер готов: http://127.0.0.1:8008/reply`.
 5. Вручную дёрнуть `POST /reply` (curl или короткий `httpx`-скрипт) с примером payload'а:
    ```json
    {"messages": [{"role": "user", "content": "привет, как дела?"}], "system_extra": "", "temperature": 0.6, "top_p": 0.8, "max_new_tokens": 150}
    ```
+   curl -X POST http://127.0.0.1:8008/reply \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "привет, как дела?"}], "system_extra": "", "temperature": 0.6, "top_p": 0.8, "max_new_tokens": 150}'
 6. Тест tool calling на локальной модели (см. ниже) — решить, переключать ли `decide_tools()` на local.
 7. Выставить `INFERENCE_BACKEND=local`, прогнать реальный/тестовый чат через `main.py`: текст от локальной модели, `change_activity` по-прежнему работает, падение `serve_model.py` не роняет бота, сбой решения по тулам не роняет уже сгенерированный текст.
 8. Вернуть `INFERENCE_BACKEND=openai`, убедиться что старый путь не сломался.
@@ -44,13 +47,28 @@
 # внутри WSL2 (если хост Windows) или прямо в Linux-шелле (если хост облачный)
 pip install vllm
 
+export CUDA_HOME=/home/abc/.local/lib/python3.10/site-packages/nvidia/cu13
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export PATH="$HOME/.local/bin:$PATH"
+
 vllm serve unsloth/Qwen3.5-4B \
   --enable-lora \
   --lora-modules nastya=lora_v2 \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
-  --port 8010
+  --port 8010 \
+  --gpu-memory-utilization 0.85 \
+  --max-model-len 4096 \
+  --quantization bitsandbytes \
+  --enforce-eager
 ```
+Что тут для чего (на будущее, если опять придётся поднимать):
+
+CUDA_HOME — flashinfer иначе не находит pip-шный nvcc для JIT-компиляции кернелов
+VLLM_USE_FLASHINFER_SAMPLER=0 — обходит несовместимость версии nvcc с бандл-headers flashinfer при компиляции сэмплера
+--quantization bitsandbytes — без него bf16-веса (8.68 ГБ) не влезают в 10 ГБ карты вместе с KV-кэшем
+--enforce-eager — без него CUDA-graph capture под ~50 размеров батча съедает остаток памяти сверху
+
 `--tool-call-parser hermes` — стартовая точка (в vLLM это самый распространённый парсер для Qwen-семейства на момент написания), но конкретное имя **нужно свериться на месте** через `vllm serve --help` / документацию vLLM — эта часть API меняется от версии к версии. Если `--enable-lora` с `unsloth/Qwen3.5-4B` (bnb-4bit версия от unsloth) не взлетит под vLLM — попробовать оригинальный `Qwen/Qwen3.5-4B-Instruct` как базу; сам LoRA-адаптер от способа квантизации базы не зависит, а то, как именно vLLM грузит базовую модель, — зависит.
 
 ### 2. Набор провокационных реплик
