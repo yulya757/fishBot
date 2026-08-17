@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -717,7 +717,9 @@ class UnslothDPOConfig(DPOConfig):
         report_to = 'none',
         run_name = None,
         project = 'huggingface',
-        trackio_space_id = 'trackio',
+        trackio_space_id = None,
+        trackio_bucket_id = None,
+        trackio_static_space_id = None,
         eval_strategy = 'no',
         eval_steps = None,
         eval_delay = 0,
@@ -757,6 +759,8 @@ class UnslothDPOConfig(DPOConfig):
         dataloader_pin_memory = True,
         dataloader_persistent_workers = False,
         dataloader_prefetch_factor = None,
+        dataloader_multiprocessing_context = None,
+        dataloader_in_order = True,
         remove_unused_columns = True,
         label_names = None,
         train_sampling_strategy = 'random',
@@ -764,6 +768,7 @@ class UnslothDPOConfig(DPOConfig):
         ddp_find_unused_parameters = None,
         ddp_bucket_cap_mb = None,
         ddp_broadcast_buffers = None,
+        ddp_static_graph = None,
         ddp_backend = None,
         ddp_timeout = 1800,
         fsdp = None,
@@ -775,8 +780,6 @@ class UnslothDPOConfig(DPOConfig):
         do_eval = False,
         do_predict = False,
         resume_from_checkpoint = None,
-        warmup_ratio = None,
-        logging_dir = None,
         local_rank = -1,
         model_init_kwargs = None,
         ref_model_init_kwargs = None,
@@ -888,6 +891,8 @@ class UnslothDPOConfig(DPOConfig):
             run_name = run_name,
             project = project,
             trackio_space_id = trackio_space_id,
+            trackio_bucket_id = trackio_bucket_id,
+            trackio_static_space_id = trackio_static_space_id,
             eval_strategy = eval_strategy,
             eval_steps = eval_steps,
             eval_delay = eval_delay,
@@ -927,6 +932,8 @@ class UnslothDPOConfig(DPOConfig):
             dataloader_pin_memory = dataloader_pin_memory,
             dataloader_persistent_workers = dataloader_persistent_workers,
             dataloader_prefetch_factor = dataloader_prefetch_factor,
+            dataloader_multiprocessing_context = dataloader_multiprocessing_context,
+            dataloader_in_order = dataloader_in_order,
             remove_unused_columns = remove_unused_columns,
             label_names = label_names,
             train_sampling_strategy = train_sampling_strategy,
@@ -934,6 +941,7 @@ class UnslothDPOConfig(DPOConfig):
             ddp_find_unused_parameters = ddp_find_unused_parameters,
             ddp_bucket_cap_mb = ddp_bucket_cap_mb,
             ddp_broadcast_buffers = ddp_broadcast_buffers,
+            ddp_static_graph = ddp_static_graph,
             ddp_backend = ddp_backend,
             ddp_timeout = ddp_timeout,
             fsdp = fsdp,
@@ -945,8 +953,6 @@ class UnslothDPOConfig(DPOConfig):
             do_eval = do_eval,
             do_predict = do_predict,
             resume_from_checkpoint = resume_from_checkpoint,
-            warmup_ratio = warmup_ratio,
-            logging_dir = logging_dir,
             local_rank = local_rank,
             model_init_kwargs = model_init_kwargs,
             ref_model_init_kwargs = ref_model_init_kwargs,

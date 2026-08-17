@@ -1,12 +1,16 @@
 import json
 import os
 import asyncio
+import socket
+import subprocess
+import time
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ChatAction
 import database
-from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND
+from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND, LOCAL_MODEL_URL
 from datetime import datetime, timedelta
 import random
 
@@ -419,10 +423,61 @@ async def initiative_worker():
 
 # --- ЗАПУСК БОТА ---
 
+WSL_DISTRO = "Ubuntu-22.04"
+LOCAL_SERVER_STARTUP_TIMEOUT = 180  # секунд на загрузку модели в WSL
+LOCAL_SERVER_PROCESS = None
+
+
+def start_local_model_server():
+    """Поднимает serve_model.py в WSL и ждёт, пока модель загрузится и порт откликнется.
+    Успешный TCP-коннект = сервер уже прошёл load_model() (он биндит порт только после neё)."""
+    global LOCAL_SERVER_PROCESS
+    parsed = urlparse(LOCAL_MODEL_URL)
+    host, port = parsed.hostname, parsed.port
+
+    print(f"Запускаю локальный сервер модели в WSL ({host}:{port})...")
+    log_file = open('serve_model.log', 'a', encoding='utf-8')
+    LOCAL_SERVER_PROCESS = subprocess.Popen(
+        ['wsl', '-d', WSL_DISTRO, '--', 'bash', '-c', 'cd /mnt/d/FISHBOT && python3 serve_model.py'],
+        stdout=log_file, stderr=subprocess.STDOUT,
+    )
+
+    deadline = time.monotonic() + LOCAL_SERVER_STARTUP_TIMEOUT
+    while time.monotonic() < deadline:
+        if LOCAL_SERVER_PROCESS.poll() is not None:
+            raise RuntimeError(
+                f"serve_model.py завершился раньше времени (код {LOCAL_SERVER_PROCESS.returncode}). "
+                "Смотри serve_model.log."
+            )
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                print("Локальный сервер модели готов.")
+                return
+        except OSError:
+            time.sleep(1)
+
+    raise RuntimeError(
+        f"Локальный сервер модели не поднялся за {LOCAL_SERVER_STARTUP_TIMEOUT} сек. Смотри serve_model.log."
+    )
+
+
+def stop_local_model_server():
+    if LOCAL_SERVER_PROCESS and LOCAL_SERVER_PROCESS.poll() is None:
+        print("Останавливаю локальный сервер модели...")
+        LOCAL_SERVER_PROCESS.terminate()
+        try:
+            LOCAL_SERVER_PROCESS.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            LOCAL_SERVER_PROCESS.kill()
+
+
 async def main():
     print("Инициализация базы данных...")
     database.init_db()
-    
+
+    if INFERENCE_BACKEND == "local":
+        start_local_model_server()
+
     print("Обновление кеша разрешенных чатов...")
     await update_allowed_chats_cache()
 
@@ -430,7 +485,10 @@ async def main():
     asyncio.create_task(initiative_worker())
 
     print(f"Бот успешно запущен в режиме Telegram Business. Инференс: {INFERENCE_BACKEND}.")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        stop_local_model_server()
 
 if __name__ == '__main__':
     asyncio.run(main())

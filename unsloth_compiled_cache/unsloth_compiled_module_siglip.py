@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -213,7 +213,7 @@ class SiglipVisionEmbeddings(nn.Module):
         self.num_patches = (self.image_size // self.patch_size) ** 2
         self.num_positions = self.num_patches
         self.position_embedding = nn.Embedding(self.num_positions, self.embed_dim)
-        self.register_buffer("position_ids", torch.arange(self.num_positions).expand((1, -1)), persistent=False)
+        self.position_ids = nn.Buffer(torch.arange(self.num_positions).expand((1, -1)), persistent=False)
 
     def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
         """
@@ -293,9 +293,7 @@ class SiglipTextEmbeddings(nn.Module):
         self.position_embedding = nn.Embedding(config.max_position_embeddings, embed_dim)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer(
-            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
-        )
+        self.position_ids = nn.Buffer(torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False)
 
     def forward(
         self,
@@ -346,15 +344,12 @@ def SiglipAttention_forward(
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Input shape: Batch x Time x Channel"""
 
-    batch_size, seq_length, embed_dim = hidden_states.shape
+    input_shape = hidden_states.shape[:-1]
 
-    queries = self.q_proj(hidden_states)
-    keys = self.k_proj(hidden_states)
-    values = self.v_proj(hidden_states)
-
-    queries = queries.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-    keys = keys.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-    values = values.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
+    hidden_shape = (*input_shape, -1, self.head_dim)
+    queries = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+    keys = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+    values = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
     attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
         self.config._attn_implementation, eager_attention_forward
@@ -371,7 +366,7 @@ def SiglipAttention_forward(
         dropout=0.0 if not self.training else self.dropout,
     )
 
-    attn_output = attn_output.reshape(batch_size, seq_length, embed_dim).contiguous()
+    attn_output = attn_output.reshape(*input_shape, -1).contiguous()
     attn_output = self.out_proj(attn_output)
 
     return attn_output, attn_weights

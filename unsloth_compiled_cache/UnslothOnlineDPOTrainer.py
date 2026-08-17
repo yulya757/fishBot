@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -29,7 +29,7 @@ from torch.nn import functional as F
 from unsloth_zoo.temporary_patches.common import torch_compile
 from unsloth_zoo.temporary_patches.common import _maybe_compile
 from typing import Any, List, Optional, Tuple, Union, Dict, Set, Callable
-from trl.trainer.online_dpo_trainer import (Any, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, BasePairwiseJudge, BaseTrainer, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalPrediction, F, FSDP, GenerationConfig, IterableDataset, MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES, OnlineDPOConfig, OnlineDPOTrainer, OptimizerNames, Optional, Path, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RewardFunc, SIMPLE_CHAT_TEMPLATE, Trainer, TrainerCallback, Union, apply_chat_template, broadcast_object_list, create_reference_model, disable_dropout_in_model, empty_cache, gather_object, is_conversational, is_flash_attn_2_available, is_peft_model, jinja2, logger, logging, maybe_apply_chat_template, nn, nullcontext, os, pad, prepare_deepspeed, prepare_fsdp, profiling_context, re, seed_worker, textwrap, torch, truncate_right, unwrap_model_for_generation, version, warnings, wraps, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, BasePairwiseJudge, Callable, DPODataCollatorWithPadding, DataCollator, Dataset, EvalPrediction, F, GenerationConfig, IterableDataset, MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES, OnlineDPOConfig, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RewardFunc, Trainer, TrainerCallback, Union, create_reference_model, disable_dropout_in_model, logger, nn, os, pad, prepare_deepspeed, prepare_fsdp, re, torch, version, warnings, F, apply_chat_template, is_conversational, re, F, FSDP, is_peft_model, nn, nullcontext, os, re, version, F, PreTrainedModel, Trainer, logger, os, re, torch, F, FSDP, nn, os, re, F, FSDP, nn, re, torch)
+from trl.trainer.online_dpo_trainer import (Any, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, BasePairwiseJudge, BaseTrainer, Callable, DPODataCollatorWithPadding, DataCollator, DataLoader, Dataset, EvalPrediction, F, FSDP, GenerationConfig, IterableDataset, LLM, MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES, OnlineDPOConfig, OnlineDPOTrainer, OptimizerNames, Optional, Path, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RewardFunc, SIMPLE_CHAT_TEMPLATE, SamplingParams, Trainer, TrainerCallback, Union, apply_chat_template, broadcast_object_list, create_reference_model, disable_dropout_in_model, empty_cache, gather_object, is_conversational, is_flash_attn_2_available, is_peft_model, jinja2, logger, logging, maybe_apply_chat_template, nn, nullcontext, os, pad, prepare_deepspeed, prepare_fsdp, profiling_context, re, seed_worker, textwrap, torch, truncate_right, unwrap_model_for_generation, version, warnings, wraps, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, BasePairwiseJudge, Callable, DPODataCollatorWithPadding, DataCollator, Dataset, EvalPrediction, F, GenerationConfig, IterableDataset, LLM, MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES, OnlineDPOConfig, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RewardFunc, SamplingParams, Trainer, TrainerCallback, Union, create_reference_model, disable_dropout_in_model, logger, nn, os, pad, prepare_deepspeed, prepare_fsdp, re, torch, version, warnings, F, LLM, apply_chat_template, is_conversational, re, F, FSDP, LLM, is_peft_model, nn, nullcontext, os, re, version, F, PreTrainedModel, Trainer, logger, os, re, torch, F, FSDP, LLM, nn, os, re, F, FSDP, nn, re, torch)
 
 
 import os
@@ -628,7 +628,9 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         report_to = 'none',
         run_name = None,
         project = 'huggingface',
-        trackio_space_id = 'trackio',
+        trackio_space_id = None,
+        trackio_bucket_id = None,
+        trackio_static_space_id = None,
         eval_strategy = 'no',
         eval_steps = None,
         eval_delay = 0,
@@ -668,6 +670,8 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         dataloader_pin_memory = True,
         dataloader_persistent_workers = False,
         dataloader_prefetch_factor = None,
+        dataloader_multiprocessing_context = None,
+        dataloader_in_order = True,
         remove_unused_columns = True,
         label_names = None,
         train_sampling_strategy = 'random',
@@ -675,6 +679,7 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         ddp_find_unused_parameters = None,
         ddp_bucket_cap_mb = None,
         ddp_broadcast_buffers = None,
+        ddp_static_graph = None,
         ddp_backend = None,
         ddp_timeout = 1800,
         fsdp = None,
@@ -686,8 +691,6 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
         do_eval = False,
         do_predict = False,
         resume_from_checkpoint = None,
-        warmup_ratio = None,
-        logging_dir = None,
         local_rank = -1,
         reward_model_path = None,
         judge = None,
@@ -800,6 +803,8 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             run_name = run_name,
             project = project,
             trackio_space_id = trackio_space_id,
+            trackio_bucket_id = trackio_bucket_id,
+            trackio_static_space_id = trackio_static_space_id,
             eval_strategy = eval_strategy,
             eval_steps = eval_steps,
             eval_delay = eval_delay,
@@ -839,6 +844,8 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             dataloader_pin_memory = dataloader_pin_memory,
             dataloader_persistent_workers = dataloader_persistent_workers,
             dataloader_prefetch_factor = dataloader_prefetch_factor,
+            dataloader_multiprocessing_context = dataloader_multiprocessing_context,
+            dataloader_in_order = dataloader_in_order,
             remove_unused_columns = remove_unused_columns,
             label_names = label_names,
             train_sampling_strategy = train_sampling_strategy,
@@ -846,6 +853,7 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             ddp_find_unused_parameters = ddp_find_unused_parameters,
             ddp_bucket_cap_mb = ddp_bucket_cap_mb,
             ddp_broadcast_buffers = ddp_broadcast_buffers,
+            ddp_static_graph = ddp_static_graph,
             ddp_backend = ddp_backend,
             ddp_timeout = ddp_timeout,
             fsdp = fsdp,
@@ -857,8 +865,6 @@ class UnslothOnlineDPOConfig(OnlineDPOConfig):
             do_eval = do_eval,
             do_predict = do_predict,
             resume_from_checkpoint = resume_from_checkpoint,
-            warmup_ratio = warmup_ratio,
-            logging_dir = logging_dir,
             local_rank = local_rank,
             reward_model_path = reward_model_path,
             judge = judge,

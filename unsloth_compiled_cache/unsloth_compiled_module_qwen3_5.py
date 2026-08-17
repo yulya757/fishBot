@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -179,26 +179,22 @@ from torch.nn import functional as F
 from unsloth_zoo.temporary_patches.utils import torch_compile_with_fallback
 from unsloth_zoo.temporary_patches.common import torch_compile
 from typing import Any, List, Optional, Tuple, Union, Dict, Set, Callable
-from transformers.models.qwen3_5.modeling_qwen3_5 import (F, Callable, Any, Optional, torch, nn, init, ACT2FN, Cache, GenerationMixin, FlashAttentionKwargs, ModelOutput, BaseModelOutputWithPooling, CausalLMOutputWithPast, ROPE_INIT_FUNCTIONS, dynamic_rope_update, ALL_ATTENTION_FUNCTIONS, PreTrainedModel, Unpack, TransformersKwargs, can_return_tuple, is_flash_attention_requested, maybe_autocast, Qwen3_5Config, Qwen3_5TextConfig, Qwen3_5VisionConfig, causal_conv1d_fn, causal_conv1d_update, FusedRMSNormGated, chunk_gated_delta_rule, fused_recurrent_gated_delta_rule, logger, __name__, is_fast_path_available, Qwen3_5PreTrainedModel, Qwen3_5Model, Qwen3_5CausalLMOutputWithPast, Qwen3_5ForConditionalGeneration, Qwen3_5GatedDeltaNet)
+from transformers.models.qwen3_5.modeling_qwen3_5 import (F, Callable, Any, torch, nn, init, ACT2FN, Cache, GenerationMixin, use_kernel_func_from_hub_with_fallback, force_accelerate_hooks, FlashAttentionKwargs, BaseModelOutputWithPooling, CausalLMOutputWithPast, ROPE_INIT_FUNCTIONS, dynamic_rope_update, ALL_ATTENTION_FUNCTIONS, PreTrainedModel, Unpack, TransformersKwargs, can_return_tuple, deprecate_kwarg, get_max_seqlen, is_flash_attention_requested, maybe_autocast, Qwen3_5Config, Qwen3_5TextConfig, Qwen3_5VisionConfig, Qwen3_5PreTrainedModel, __name__, Qwen3_5Model, Qwen3_5CausalLMOutputWithPast, Qwen3_5ForConditionalGeneration, Qwen3_5GatedDeltaNet)
 
 @torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
-def Qwen3_5VisionRotaryEmbedding_forward(self, seqlen: int) -> torch.Tensor:
-    seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
-    freqs = torch.outer(seq, self.inv_freq)
-    return freqs
+def Qwen3_5VisionRotaryEmbedding_forward(self, position_ids: torch.Tensor) -> torch.Tensor:
+    return (position_ids.unsqueeze(-1) * self.inv_freq).flatten(1)
 
 class Qwen3_5VisionRotaryEmbedding(nn.Module):
-    inv_freq: torch.Tensor  # fix linting for `register_buffer`
-
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
         self.dim = dim
         self.theta = theta
         inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.inv_freq = nn.Buffer(inv_freq, persistent=False)
 
-    def forward(self, seqlen: int) -> torch.Tensor:
-        return Qwen3_5VisionRotaryEmbedding_forward(self, seqlen=seqlen)
+    def forward(self, position_ids: torch.Tensor) -> torch.Tensor:
+        return Qwen3_5VisionRotaryEmbedding_forward(self, position_ids=position_ids)
 
 
 @torch_compile_with_fallback(fullgraph = False, dynamic = True, options = torch_compile_options)
@@ -209,7 +205,9 @@ def Qwen3_5TextRotaryEmbedding_forward(self, x, position_ids):
     # So we expand the inv_freq to shape (3, ...)
     if position_ids.ndim == 2:
         position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
-    inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
+    inv_freq_expanded = (
+        self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1).to(x.device)
+    )
     position_ids_expanded = position_ids[:, :, None, :].float()  # shape (3, bs, 1, positions)
 
     device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
@@ -223,8 +221,7 @@ def Qwen3_5TextRotaryEmbedding_forward(self, x, position_ids):
     return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
 
 class Qwen3_5TextRotaryEmbedding(nn.Module):
-    inv_freq: torch.Tensor  # fix linting for `register_buffer`
-
+    @deprecate_kwarg("device", version="5.18")
     def __init__(self, config: Qwen3_5TextConfig, device=None):
         super().__init__()
         self.max_seq_len_cached = config.max_position_embeddings
@@ -238,25 +235,20 @@ class Qwen3_5TextRotaryEmbedding(nn.Module):
             rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
         inv_freq, self.attention_scaling = rope_init_fn(self.config, device)
 
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
-        self.register_buffer("original_inv_freq", inv_freq.clone(), persistent=False)
+        self.inv_freq = nn.Buffer(inv_freq, persistent=False)
+        self.original_inv_freq = nn.Buffer(inv_freq.clone(), persistent=False)
         self.mrope_section = config.rope_parameters.get("mrope_section", [11, 11, 10])
 
     @staticmethod
+    @deprecate_kwarg("device", version="5.18")
     def compute_default_rope_parameters(
-        config: Qwen3_5TextConfig | None = None,
-        device: Optional["torch.device"] = None,
-        seq_len: int | None = None,
-    ) -> tuple["torch.Tensor", float]:
+        config: Qwen3_5TextConfig, device=None, **kwargs
+    ) -> tuple[torch.Tensor, float]:
         """
         Computes the inverse frequencies according to the original RoPE implementation
         Args:
             config ([`~transformers.PreTrainedConfig`]):
                 The model configuration.
-            device (`torch.device`):
-                The device to use for initialization of the inverse frequencies.
-            seq_len (`int`, *optional*):
-                The current sequence length. Unused for this type of RoPE.
         Returns:
             Tuple of (`torch.Tensor`, `float`), containing the inverse frequencies for the RoPE embeddings and the
             post-processing scaling factor applied to the computed cos/sin (unused in this type of RoPE).
@@ -267,12 +259,9 @@ class Qwen3_5TextRotaryEmbedding(nn.Module):
         dim = int(head_dim * partial_rotary_factor)
 
         attention_factor = 1.0  # Unused in this type of RoPE
-
         # Compute the inverse frequencies
-        inv_freq = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.int64).to(device=device, dtype=torch.float) / dim)
-        )
-        return inv_freq, attention_factor
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
+        return inv_freq.to(device), attention_factor
 
 
     def forward(self, x, position_ids):
@@ -304,7 +293,7 @@ def Qwen3_5RMSNormGated_forward(self, hidden_states, gate=None):
     # Norm before gate
     hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
     hidden_states = self.weight * hidden_states.to(input_dtype)
-    hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+    hidden_states = hidden_states * ACT2FN[self.activation](gate.to(torch.float32))
 
     return hidden_states.to(input_dtype)
 
@@ -313,6 +302,7 @@ class Qwen3_5RMSNormGated(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
+        self.activation = "silu"
 
     def forward(self, hidden_states, gate=None):
         return Qwen3_5RMSNormGated_forward(self, hidden_states=hidden_states, gate=gate)
@@ -323,7 +313,7 @@ def apply_mask_to_padding_states(hidden_states, attention_mask):
     Tunes out the hidden states for padding tokens, see https://github.com/state-spaces/mamba/issues/66
     """
     # NOTE: attention mask is a 2D boolean tensor
-    if attention_mask is not None and attention_mask.shape[1] > 1 and attention_mask.shape[0] > 1:
+    if attention_mask is not None:
         dtype = hidden_states.dtype
         hidden_states = (hidden_states * attention_mask[:, :, None]).to(dtype)
 
@@ -331,12 +321,13 @@ def apply_mask_to_padding_states(hidden_states, attention_mask):
 
 
 @torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
-def torch_causal_conv1d_update(
-    hidden_states,
-    conv_state,
-    weight,
-    bias=None,
-    activation=None,
+@use_kernel_func_from_hub_with_fallback("causal_conv1d_update", "causal_conv1d")
+def causal_conv1d_update(
+    hidden_states: torch.Tensor,
+    conv_state: torch.Tensor,
+    weight: nn.Parameter,
+    bias: nn.Parameter | None = None,
+    activation: str | None = None,
 ):
     _, hidden_size, seq_len = hidden_states.shape
     state_len = conv_state.shape[-1]
@@ -344,9 +335,34 @@ def torch_causal_conv1d_update(
     hidden_states_new = torch.cat([conv_state, hidden_states], dim=-1).to(weight.dtype)
     conv_state.copy_(hidden_states_new[:, :, -state_len:])
     out = F.conv1d(hidden_states_new, weight.unsqueeze(1), bias, padding=0, groups=hidden_size)
-    out = F.silu(out[:, :, -seq_len:])
-    out = out.to(hidden_states.dtype)
-    return out
+    out = out[:, :, -seq_len:]
+    if activation is not None:
+        out = ACT2FN[activation](out)
+    return out.to(hidden_states.dtype)
+
+
+@torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
+@use_kernel_func_from_hub_with_fallback("causal_conv1d_fn", "causal_conv1d")
+def causal_conv1d_fn(
+    hidden_states: torch.Tensor,
+    weight: nn.Parameter,
+    bias: nn.Parameter | None = None,
+    activation: str | None = None,
+    **kwargs,
+):
+    _, hidden_size, seq_len = hidden_states.shape
+    padding = weight.shape[-1] - 1
+
+    out = F.conv1d(
+        hidden_states.to(weight.dtype),
+        weight=weight.unsqueeze(1),
+        bias=bias,
+        padding=padding,
+        groups=hidden_size,
+    )[:, :, :seq_len]
+    if activation is not None:
+        out = ACT2FN[activation](out)
+    return out.to(hidden_states.dtype)
 
 
 @torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
@@ -357,6 +373,7 @@ def l2norm(x: torch.FloatTensor, dim: int = -1, eps: float = 1e-6):
 
 
 @torch.compiler.disable(recursive = False)
+@use_kernel_func_from_hub_with_fallback("chunk_gated_delta_rule", "fla")
 def torch_chunk_gated_delta_rule(
     query,
     key,
@@ -367,6 +384,7 @@ def torch_chunk_gated_delta_rule(
     initial_state=None,
     output_final_state=False,
     use_qk_l2norm_in_kernel=False,
+    **kwargs,
 ):
     initial_dtype = query.dtype
     if use_qk_l2norm_in_kernel:
@@ -409,7 +427,7 @@ def torch_chunk_gated_delta_rule(
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
     last_recurrent_state = (
-        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim).to(value)
+        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=value.dtype, device=value.device)
         if initial_state is None
         else initial_state.to(value)
     )
@@ -419,7 +437,7 @@ def torch_chunk_gated_delta_rule(
     # for each chunk
     for i in range(0, total_sequence_length // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
-        attn = (q_i @ k_i.transpose(-1, -2) * decay_mask[:, :, i]).masked_fill_(mask, 0)
+        attn = q_i @ k_i.transpose(-1, -2) * decay_mask[:, :, i]
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
         v_new = v_i - v_prime
         attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
@@ -438,8 +456,17 @@ def torch_chunk_gated_delta_rule(
 
 
 @torch.compiler.disable(recursive = False)
+@use_kernel_func_from_hub_with_fallback("recurrent_gated_delta_rule", "fla")
 def torch_recurrent_gated_delta_rule(
-    query, key, value, g, beta, initial_state, output_final_state, use_qk_l2norm_in_kernel=False
+    query,
+    key,
+    value,
+    g,
+    beta,
+    initial_state,
+    output_final_state,
+    use_qk_l2norm_in_kernel=False,
+    **kwargs,
 ):
     initial_dtype = query.dtype
     if use_qk_l2norm_in_kernel:
@@ -454,9 +481,11 @@ def torch_recurrent_gated_delta_rule(
     scale = 1 / (query.shape[-1] ** 0.5)
     query = query * scale
 
-    core_attn_out = torch.zeros(batch_size, num_heads, sequence_length, v_head_dim).to(value)
+    core_attn_out = torch.zeros(
+        batch_size, num_heads, sequence_length, v_head_dim, dtype=value.dtype, device=value.device
+    )
     last_recurrent_state = (
-        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim).to(value)
+        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=value.dtype, device=value.device)
         if initial_state is None
         else initial_state.to(value)
     )
@@ -481,25 +510,19 @@ def torch_recurrent_gated_delta_rule(
 
 
 @torch.compiler.disable(recursive = False)
+@force_accelerate_hooks("conv1d")
 def Qwen3_5GatedDeltaNet_forward(
     self,
     hidden_states: torch.Tensor,
     cache_params: Cache | None = None,
     attention_mask: torch.Tensor | None = None,
+    **kwargs: Unpack[TransformersKwargs],
 ):
     hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
 
     # Set up dimensions for reshapes later
     batch_size, seq_len, _ = hidden_states.shape
-
-    use_precomputed_states = (
-        cache_params is not None and cache_params.has_previous_state(self.layer_idx) and seq_len == 1
-    )
-
-    # getting projected states from cache if it exists
-    if use_precomputed_states:
-        conv_state = cache_params.layers[self.layer_idx].conv_states
-        recurrent_state = cache_params.layers[self.layer_idx].recurrent_states
+    use_precomputed_states = cache_params is not None and cache_params.has_previous_state(self.layer_idx)
 
     mixed_qkv = self.in_proj_qkv(hidden_states)
     mixed_qkv = mixed_qkv.transpose(1, 2)
@@ -510,10 +533,10 @@ def Qwen3_5GatedDeltaNet_forward(
     b = self.in_proj_b(hidden_states)
     a = self.in_proj_a(hidden_states)
 
-    if use_precomputed_states:
-        # 2. Convolution sequence transformation
-        # NOTE: the conv state is updated in `causal_conv1d_update`
-        mixed_qkv = self.causal_conv1d_update(
+    if use_precomputed_states and seq_len == 1 and not cache_params.layers[self.layer_idx].record_past:
+        conv_state = cache_params.layers[self.layer_idx].conv_states[0]
+        # Single-token cached decode: the fused per-step kernel updates the conv state in-place.
+        mixed_qkv = causal_conv1d_update(
             mixed_qkv,
             conv_state,
             self.conv1d.weight.squeeze(1),
@@ -522,18 +545,21 @@ def Qwen3_5GatedDeltaNet_forward(
         )
     else:
         if cache_params is not None:
-            conv_state = F.pad(mixed_qkv, (self.conv_kernel_size - mixed_qkv.shape[-1], 0))
-            conv_state = cache_params.update_conv_state(conv_state, self.layer_idx)
-        if self.causal_conv1d_fn is not None:
-            mixed_qkv = self.causal_conv1d_fn(
-                x=mixed_qkv,
-                weight=self.conv1d.weight.squeeze(1),
-                bias=self.conv1d.bias,
-                activation=self.activation,
-                seq_idx=None,
+            mixed_qkv = cache_params.update_conv_state(
+                mixed_qkv, self.layer_idx, conv_kernel_size=self.conv_kernel_size
             )
-        else:
-            mixed_qkv = F.silu(self.conv1d(mixed_qkv)[:, :, :seq_len])
+
+        mixed_qkv = causal_conv1d_fn(
+            mixed_qkv,
+            self.conv1d.weight.squeeze(1),
+            self.conv1d.bias,
+            activation=self.activation,
+            **kwargs,
+        )
+
+        # Drop the additional previous states
+        if cache_params is not None:
+            mixed_qkv = mixed_qkv[:, :, -seq_len:]
 
     mixed_qkv = mixed_qkv.transpose(1, 2)
     query, key, value = torch.split(
@@ -557,20 +583,9 @@ def Qwen3_5GatedDeltaNet_forward(
         query = query.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
         key = key.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
 
-    if not use_precomputed_states:
-        core_attn_out, last_recurrent_state = self.chunk_gated_delta_rule(
-            query,
-            key,
-            value,
-            g=g,
-            beta=beta,
-            initial_state=None,
-            output_final_state=cache_params is not None,
-            use_qk_l2norm_in_kernel=True,
-        )
-
-    else:
-        core_attn_out, last_recurrent_state = self.recurrent_gated_delta_rule(
+    recurrent_state = cache_params.layers[self.layer_idx].recurrent_states[0] if use_precomputed_states else None
+    if use_precomputed_states and seq_len == 1:
+        core_attn_out, last_recurrent_state = torch_recurrent_gated_delta_rule(
             query,
             key,
             value,
@@ -579,6 +594,21 @@ def Qwen3_5GatedDeltaNet_forward(
             initial_state=recurrent_state,
             output_final_state=cache_params is not None,
             use_qk_l2norm_in_kernel=True,
+            cu_seqlens=kwargs.pop("cu_seq_lens_q", None),
+            **kwargs,
+        )
+    else:
+        core_attn_out, last_recurrent_state = torch_chunk_gated_delta_rule(
+            query,
+            key,
+            value,
+            g=g,
+            beta=beta,
+            initial_state=recurrent_state,
+            output_final_state=cache_params is not None,
+            use_qk_l2norm_in_kernel=True,
+            cu_seqlens=kwargs.pop("cu_seq_lens_q", None),
+            **kwargs,
         )
 
     # Update cache
@@ -608,7 +638,6 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         self.conv_kernel_size = config.linear_conv_kernel_dim
         self.layer_idx = layer_idx
         self.activation = config.hidden_act
-        self.act = ACT2FN[config.hidden_act]
         self.layer_norm_epsilon = config.rms_norm_eps
 
         # QKV
@@ -629,44 +658,25 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         A = torch.empty(self.num_v_heads).uniform_(0, 16)
         self.A_log = nn.Parameter(torch.log(A))
 
-        self.norm = (
-            Qwen3_5RMSNormGated(self.head_v_dim, eps=self.layer_norm_epsilon)
-            if FusedRMSNormGated is None
-            else FusedRMSNormGated(
-                self.head_v_dim,
-                eps=self.layer_norm_epsilon,
-                activation=self.activation,
-                device=torch.cuda.current_device(),
-                dtype=config.dtype if config.dtype is not None else torch.get_default_dtype(),
-            )
-        )
-
+        self.norm = Qwen3_5RMSNormGated(self.head_v_dim, eps=self.layer_norm_epsilon)
         self.out_proj = nn.Linear(self.value_dim, self.hidden_size, bias=False)
 
-        self.causal_conv1d_fn = causal_conv1d_fn
-        self.causal_conv1d_update = causal_conv1d_update or torch_causal_conv1d_update
-        self.chunk_gated_delta_rule = chunk_gated_delta_rule or torch_chunk_gated_delta_rule
-        self.recurrent_gated_delta_rule = fused_recurrent_gated_delta_rule or torch_recurrent_gated_delta_rule
-
-        if not is_fast_path_available:
-            logger.warning_once(
-                "The fast path is not available because one of the required library is not installed. Falling back to "
-                "torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and"
-                " https://github.com/Dao-AILab/causal-conv1d"
-            )
+        self.layer_type = config.layer_types[layer_idx]
 
         self.in_proj_qkv = nn.Linear(self.hidden_size, self.key_dim * 2 + self.value_dim, bias=False)
         self.in_proj_z = nn.Linear(self.hidden_size, self.value_dim, bias=False)
         self.in_proj_b = nn.Linear(self.hidden_size, self.num_v_heads, bias=False)
         self.in_proj_a = nn.Linear(self.hidden_size, self.num_v_heads, bias=False)
 
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         cache_params: Cache | None = None,
         attention_mask: torch.Tensor | None = None,
+        **kwargs: Unpack[TransformersKwargs],
     ):
-        return Qwen3_5GatedDeltaNet_forward(self, hidden_states=hidden_states, cache_params=cache_params, attention_mask=attention_mask)
+        return Qwen3_5GatedDeltaNet_forward(self, hidden_states=hidden_states, cache_params=cache_params, attention_mask=attention_mask, **kwargs)
 
 
 @torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
@@ -976,8 +986,8 @@ def Qwen3_5VisionAttention_forward(
     self,
     hidden_states: torch.Tensor,
     cu_seqlens: torch.Tensor,
-    rotary_pos_emb: torch.Tensor | None = None,
     position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+    max_seqlen: int | None = None,
     **kwargs,
 ) -> torch.Tensor:
     seq_length = hidden_states.shape[0]
@@ -997,7 +1007,7 @@ def Qwen3_5VisionAttention_forward(
 
     if is_flash_attention_requested(self.config):
         # Flash Attention: Use cu_seqlens for variable length attention
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+        max_seqlen = get_max_seqlen(cu_seqlens, self.config, kwargs={"max_seqlen": max_seqlen})
         attn_output, _ = attention_interface(
             self,
             query_states,
@@ -1058,11 +1068,61 @@ class Qwen3_5VisionAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         cu_seqlens: torch.Tensor,
-        rotary_pos_emb: torch.Tensor | None = None,
         position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        max_seqlen: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        return Qwen3_5VisionAttention_forward(self, hidden_states=hidden_states, cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb, position_embeddings=position_embeddings, **kwargs)
+        return Qwen3_5VisionAttention_forward(self, hidden_states=hidden_states, cu_seqlens=cu_seqlens, position_embeddings=position_embeddings, max_seqlen=max_seqlen, **kwargs)
+
+
+@torch_compile_with_fallback(fullgraph = True, dynamic = True, options = torch_compile_options)
+def get_vision_position_ids(
+    grid_thw: torch.Tensor,
+    spatial_merge_size: int | torch.Tensor,
+    include_temporal: bool = False,
+    kwargs: dict | None = None,
+) -> torch.Tensor:
+    """Get position IDs for vision rotary embeddings, or pop from `kwargs` if precomputed.
+
+    Args:
+        grid_thw: `(num_images_or_videos, 3)`
+        spatial_merge_size: merge block size — either a single `int` (same for all images)
+            or a `(num_images_or_videos,)` tensor (per-image).
+        kwargs: optional caller kwargs — if it contains `"position_ids"` it is popped and returned.
+        include_temporal: when ``True``, prepend a temporal-index column and return
+            `(total_tokens, 3)` — for encoders whose rotary embedding rotates T/H/W axes
+            (minimax_m3_vl). When ``False`` (default), return `(total_tokens, 2)` for the
+            2-axis (h, w) case (qwen2_5_vl / qwen3_vl / glm4v / paddleocr_vl); the h/w
+            indices are still repeated ``t`` times for video inputs.
+
+    Returns:
+        `position_ids`: `(total_tokens, 3)` long if ``include_temporal`` else `(total_tokens, 2)`,
+        with the spatial indices laid out block-major over ``m×m`` spatial-merge blocks.
+    """
+    if kwargs is not None and (position_ids := kwargs.pop("position_ids", None)) is not None:
+        return position_ids
+
+    device = grid_thw.device
+    if isinstance(spatial_merge_size, int):
+        spatial_merge_size = torch.tensor([spatial_merge_size], device=device).expand(len(grid_thw))
+
+    position_ids = []
+    for (t, h, w), merge_size in zip(grid_thw.tolist(), spatial_merge_size.tolist()):
+        hpos_ids, wpos_ids = torch.meshgrid(
+            torch.arange(h, device=device),
+            torch.arange(w, device=device),
+            indexing="ij",
+        )
+        block_shape = (h // merge_size, merge_size, w // merge_size, merge_size)
+        hpos_ids = hpos_ids.reshape(block_shape).transpose(1, 2).flatten()
+        wpos_ids = wpos_ids.reshape(block_shape).transpose(1, 2).flatten()
+        if include_temporal:
+            tpos_ids = torch.arange(t, device=device).repeat_interleave(h * w)
+            position_ids.append(torch.stack([tpos_ids, hpos_ids.repeat(t), wpos_ids.repeat(t)], dim=-1))
+        else:
+            position_ids.append(torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
+
+    return torch.cat(position_ids, dim=0)
 
 
 @torch.compiler.disable(recursive = False)
@@ -1084,15 +1144,6 @@ def Qwen3_5ForConditionalGeneration_forward(
     **kwargs: Unpack[TransformersKwargs],
 ) -> tuple | Qwen3_5CausalLMOutputWithPast:
     r"""
-    labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
-        Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
-        config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
-        (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
-    image_grid_thw (`torch.LongTensor` of shape `(num_images, 3)`, *optional*):
-        The temporal, height and width of feature shape of each image in LLM.
-    video_grid_thw (`torch.LongTensor` of shape `(num_videos, 3)`, *optional*):
-        The temporal, height and width of feature shape of each video in LLM.
-
     Example:
 
     ```python
@@ -1300,7 +1351,6 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
     _tied_weights_keys = {"lm_head.weight": "model.language_model.embed_tokens.weight"}
     # Reference: fix gemma3 grad acc #37208
     accepts_loss_kwargs = False
-    config: Qwen3_5Config
 
     def __init__(self, config):
         super().__init__(config)
@@ -1308,12 +1358,6 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
         self.lm_head = nn.Linear(config.text_config.hidden_size, config.text_config.vocab_size, bias=False)
 
         self.post_init()
-
-    def get_input_embeddings(self):
-        return self.model.get_input_embeddings()
-
-    def set_input_embeddings(self, value):
-        self.model.set_input_embeddings(value)
 
     def get_video_features(
         self,
@@ -1324,12 +1368,8 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
         r"""
         pixel_values_videos (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
             The tensors corresponding to the input videos.
-        video_grid_thw (`torch.LongTensor` of shape `(num_videos, 3)`, *optional*):
-            The temporal, height and width of feature shape of each video in LLM.
         """
-        return self.model.get_video_features(
-            pixel_values_videos=pixel_values_videos, video_grid_thw=video_grid_thw, **kwargs
-        )
+        return self.model.get_video_features(pixel_values_videos, video_grid_thw, **kwargs)
 
     def get_image_features(
         self,
@@ -1340,10 +1380,8 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
         r"""
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
             The tensors corresponding to the input images.
-        image_grid_thw (`torch.LongTensor` of shape `(num_images, 3)`, *optional*):
-            The temporal, height and width of feature shape of each image in LLM.
         """
-        return self.model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw, **kwargs)
+        return self.model.get_image_features(pixel_values, image_grid_thw, **kwargs)
 
 
     def forward(
@@ -1363,44 +1401,6 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen3_5CausalLMOutputWithPast:
         return Qwen3_5ForConditionalGeneration_forward(self, input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, labels=labels, pixel_values=pixel_values, pixel_values_videos=pixel_values_videos, image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw, mm_token_type_ids=mm_token_type_ids, logits_to_keep=logits_to_keep, **kwargs)
-
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        position_ids=None,
-        use_cache=True,
-        pixel_values=None,
-        pixel_values_videos=None,
-        image_grid_thw=None,
-        video_grid_thw=None,
-        is_first_iteration=False,
-        **kwargs,
-    ):
-        # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
-
-        model_inputs = super().prepare_inputs_for_generation(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            inputs_embeds=inputs_embeds,
-            position_ids=position_ids,
-            pixel_values=pixel_values,
-            pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw,
-            use_cache=use_cache,
-            is_first_iteration=is_first_iteration,
-            **kwargs,
-        )
-
-        if not is_first_iteration and use_cache:
-            model_inputs["pixel_values"] = None
-            model_inputs["pixel_values_videos"] = None
-
-        return model_inputs
 
     def _prepare_position_ids_for_generation(self, inputs_tensor, model_kwargs):
         # Overwritten -- requires 3D position ids
@@ -1465,19 +1465,19 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
             vision_start_mask = (
                 inputs_embeds
                 == self.get_input_embeddings()(
-                    torch.tensor(vision_start_token_id, dtype=torch.long, device=inputs_embeds.device)
+                    torch.full((), vision_start_token_id, dtype=torch.long, device=inputs_embeds.device)
                 )
             )[..., 0]
             image_mask = (
                 inputs_embeds
                 == self.get_input_embeddings()(
-                    torch.tensor(image_token_id, dtype=torch.long, device=inputs_embeds.device)
+                    torch.full((), image_token_id, dtype=torch.long, device=inputs_embeds.device)
                 )
             )[..., 0]
             video_mask = (
                 inputs_embeds
                 == self.get_input_embeddings()(
-                    torch.tensor(video_token_id, dtype=torch.long, device=inputs_embeds.device)
+                    torch.full((), video_token_id, dtype=torch.long, device=inputs_embeds.device)
                 )
             )[..., 0]
         else:
@@ -1588,13 +1588,3 @@ class Qwen3_5ForConditionalGeneration(Qwen3_5PreTrainedModel, GenerationMixin):
         return input_ids, model_kwargs
 
 Qwen3_5ForConditionalGeneration.__UNSLOTH_SUPPORTS_RETURN_HIDDEN_STATES__ = True
-
-
-if hasattr(logger, "addFilter"):
-    import logging
-    class HideLoggingMessage(logging.Filter):
-        def __init__(self, text): self.text = text
-        def filter(self, x): return not (self.text in x.getMessage())
-    pass
-    logger.addFilter(HideLoggingMessage("`use_cache=True`"))
-

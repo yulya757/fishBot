@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -29,7 +29,7 @@ from torch.nn import functional as F
 from unsloth_zoo.temporary_patches.common import torch_compile
 from unsloth_zoo.temporary_patches.common import _maybe_compile
 from typing import Any, List, Optional, Tuple, Union, Dict, Set, Callable
-from trl.trainer.rloo_trainer import (Any, AutoConfig, AutoModelForSequenceClassification, AutoProcessor, AutoTokenizer, BaseTrainer, DataLoader, Dataset, FSDP, GenerationConfig, IterableDataset, Optional, Path, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RLOOConfig, RLOOTrainer, RepeatSampler, RewardFunc, Sampler, SyncRefModelCallback, TrainerCallback, Union, VLLMClient, apply_chat_template, broadcast_object_list, datasets, defaultdict, deque, disable_dropout_in_model, ensure_master_addr_port, entropy_from_logits, gather, gather_object, identity, inspect, is_conversational, is_datasets_available, is_flash_attn_2_available, is_peft_model, is_rich_available, is_vllm_available, logger, logging, maybe_apply_chat_template, nanmax, nanmin, nanstd, nn, nullcontext, os, pad, partial, prepare_deepspeed, prepare_fsdp, prepare_multimodal_messages, print_prompt_completions_sample, profiling_context, profiling_decorator, seed_worker, selective_log_softmax, set_seed, shuffle_sequence_dict, split_pixel_values_by_grid, split_tensor_dict, textwrap, torch, transformers, unsplit_pixel_values_by_grid, unwrap_model_for_generation, warnings, AutoConfig, AutoModelForSequenceClassification, AutoProcessor, AutoTokenizer, Dataset, GenerationConfig, IterableDataset, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RLOOConfig, RLOOTrainer, RewardFunc, SyncRefModelCallback, TrainerCallback, Union, VLLMClient, datasets, defaultdict, deque, disable_dropout_in_model, ensure_master_addr_port, identity, inspect, is_peft_model, is_vllm_available, logger, nn, os, pad, prepare_deepspeed, prepare_fsdp, set_seed, torch, transformers, warnings, FSDP, Optional, apply_chat_template, broadcast_object_list, gather, gather_object, is_flash_attn_2_available, maybe_apply_chat_template, nullcontext, os, pad, prepare_multimodal_messages, profiling_context, torch, transformers, unwrap_model_for_generation, FSDP, gather, is_peft_model, nn, nullcontext, os, profiling_decorator, Any, Union, profiling_decorator, shuffle_sequence_dict, split_pixel_values_by_grid, split_tensor_dict, torch, unsplit_pixel_values_by_grid, PreTrainedModel, logger, os, torch, FSDP, nn, os, FSDP, nn, torch)
+from trl.trainer.rloo_trainer import (Any, AutoConfig, AutoModelForSequenceClassification, AutoProcessor, AutoTokenizer, BaseTrainer, DataLoader, Dataset, FSDP, GenerationConfig, GuidedDecodingParams, IterableDataset, LLM, Optional, Path, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RLOOConfig, RLOOTrainer, RepeatSampler, RewardFunc, Sampler, SamplingParams, SyncRefModelCallback, TrainerCallback, Union, VLLMClient, apply_chat_template, broadcast_object_list, datasets, defaultdict, deque, disable_dropout_in_model, ensure_master_addr_port, entropy_from_logits, gather, gather_object, identity, inspect, is_conversational, is_datasets_available, is_flash_attn_2_available, is_peft_model, is_rich_available, is_vllm_available, logger, logging, maybe_apply_chat_template, nanmax, nanmin, nanstd, nn, nullcontext, os, pad, partial, prepare_deepspeed, prepare_fsdp, prepare_multimodal_messages, print_prompt_completions_sample, profiling_context, profiling_decorator, seed_worker, selective_log_softmax, set_seed, shuffle_sequence_dict, split_pixel_values_by_grid, split_tensor_dict, textwrap, torch, transformers, unsplit_pixel_values_by_grid, unwrap_model_for_generation, warnings, AutoConfig, AutoModelForSequenceClassification, AutoProcessor, AutoTokenizer, Dataset, GenerationConfig, IterableDataset, LLM, Optional, PeftConfig, PreTrainedModel, PreTrainedTokenizerBase, ProcessorMixin, RLOOConfig, RLOOTrainer, RewardFunc, SyncRefModelCallback, TrainerCallback, Union, VLLMClient, datasets, defaultdict, deque, disable_dropout_in_model, ensure_master_addr_port, identity, inspect, is_peft_model, is_vllm_available, logger, nn, os, pad, prepare_deepspeed, prepare_fsdp, set_seed, torch, transformers, warnings, FSDP, GuidedDecodingParams, LLM, Optional, SamplingParams, apply_chat_template, broadcast_object_list, gather, gather_object, is_flash_attn_2_available, maybe_apply_chat_template, nullcontext, os, pad, prepare_multimodal_messages, profiling_context, torch, transformers, unwrap_model_for_generation, FSDP, LLM, gather, is_peft_model, nn, nullcontext, os, profiling_decorator, Any, Union, profiling_decorator, shuffle_sequence_dict, split_pixel_values_by_grid, split_tensor_dict, torch, unsplit_pixel_values_by_grid, PreTrainedModel, logger, os, torch, FSDP, LLM, nn, os, FSDP, nn, torch)
 
 
 import os
@@ -800,7 +800,9 @@ class UnslothRLOOConfig(RLOOConfig):
         report_to = 'none',
         run_name = None,
         project = 'huggingface',
-        trackio_space_id = 'trackio',
+        trackio_space_id = None,
+        trackio_bucket_id = None,
+        trackio_static_space_id = None,
         eval_strategy = 'no',
         eval_steps = None,
         eval_delay = 0,
@@ -840,6 +842,8 @@ class UnslothRLOOConfig(RLOOConfig):
         dataloader_pin_memory = True,
         dataloader_persistent_workers = False,
         dataloader_prefetch_factor = None,
+        dataloader_multiprocessing_context = None,
+        dataloader_in_order = True,
         remove_unused_columns = False,
         label_names = None,
         train_sampling_strategy = 'random',
@@ -847,6 +851,7 @@ class UnslothRLOOConfig(RLOOConfig):
         ddp_find_unused_parameters = None,
         ddp_bucket_cap_mb = None,
         ddp_broadcast_buffers = None,
+        ddp_static_graph = None,
         ddp_backend = None,
         ddp_timeout = 1800,
         fsdp = None,
@@ -858,8 +863,6 @@ class UnslothRLOOConfig(RLOOConfig):
         do_eval = False,
         do_predict = False,
         resume_from_checkpoint = None,
-        warmup_ratio = None,
-        logging_dir = None,
         local_rank = -1,
         model_init_kwargs = None,
         disable_dropout = False,
@@ -1007,6 +1010,8 @@ class UnslothRLOOConfig(RLOOConfig):
             run_name = run_name,
             project = project,
             trackio_space_id = trackio_space_id,
+            trackio_bucket_id = trackio_bucket_id,
+            trackio_static_space_id = trackio_static_space_id,
             eval_strategy = eval_strategy,
             eval_steps = eval_steps,
             eval_delay = eval_delay,
@@ -1046,6 +1051,8 @@ class UnslothRLOOConfig(RLOOConfig):
             dataloader_pin_memory = dataloader_pin_memory,
             dataloader_persistent_workers = dataloader_persistent_workers,
             dataloader_prefetch_factor = dataloader_prefetch_factor,
+            dataloader_multiprocessing_context = dataloader_multiprocessing_context,
+            dataloader_in_order = dataloader_in_order,
             remove_unused_columns = remove_unused_columns,
             label_names = label_names,
             train_sampling_strategy = train_sampling_strategy,
@@ -1053,6 +1060,7 @@ class UnslothRLOOConfig(RLOOConfig):
             ddp_find_unused_parameters = ddp_find_unused_parameters,
             ddp_bucket_cap_mb = ddp_bucket_cap_mb,
             ddp_broadcast_buffers = ddp_broadcast_buffers,
+            ddp_static_graph = ddp_static_graph,
             ddp_backend = ddp_backend,
             ddp_timeout = ddp_timeout,
             fsdp = fsdp,
@@ -1064,8 +1072,6 @@ class UnslothRLOOConfig(RLOOConfig):
             do_eval = do_eval,
             do_predict = do_predict,
             resume_from_checkpoint = resume_from_checkpoint,
-            warmup_ratio = warmup_ratio,
-            logging_dir = logging_dir,
             local_rank = local_rank,
             model_init_kwargs = model_init_kwargs,
             disable_dropout = disable_dropout,

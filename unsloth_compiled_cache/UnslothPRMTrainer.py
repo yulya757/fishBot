@@ -1,7 +1,7 @@
 """
 2026.8.10
 2026.8.15
-5.5.0
+5.15.0
 0.24.0
 __UNSLOTH_VERSIONING__
 """
@@ -515,7 +515,9 @@ class UnslothPRMConfig(PRMConfig):
         report_to = 'none',
         run_name = None,
         project = 'huggingface',
-        trackio_space_id = 'trackio',
+        trackio_space_id = None,
+        trackio_bucket_id = None,
+        trackio_static_space_id = None,
         eval_strategy = 'no',
         eval_steps = None,
         eval_delay = 0,
@@ -555,6 +557,8 @@ class UnslothPRMConfig(PRMConfig):
         dataloader_pin_memory = True,
         dataloader_persistent_workers = False,
         dataloader_prefetch_factor = None,
+        dataloader_multiprocessing_context = None,
+        dataloader_in_order = True,
         remove_unused_columns = True,
         label_names = None,
         train_sampling_strategy = 'random',
@@ -562,6 +566,7 @@ class UnslothPRMConfig(PRMConfig):
         ddp_find_unused_parameters = None,
         ddp_bucket_cap_mb = None,
         ddp_broadcast_buffers = None,
+        ddp_static_graph = None,
         ddp_backend = None,
         ddp_timeout = 1800,
         fsdp = None,
@@ -573,8 +578,6 @@ class UnslothPRMConfig(PRMConfig):
         do_eval = False,
         do_predict = False,
         resume_from_checkpoint = None,
-        warmup_ratio = None,
-        logging_dir = None,
         local_rank = -1,
         max_length = 1024,
         max_prompt_length = 512,
@@ -660,6 +663,8 @@ class UnslothPRMConfig(PRMConfig):
             run_name = run_name,
             project = project,
             trackio_space_id = trackio_space_id,
+            trackio_bucket_id = trackio_bucket_id,
+            trackio_static_space_id = trackio_static_space_id,
             eval_strategy = eval_strategy,
             eval_steps = eval_steps,
             eval_delay = eval_delay,
@@ -699,6 +704,8 @@ class UnslothPRMConfig(PRMConfig):
             dataloader_pin_memory = dataloader_pin_memory,
             dataloader_persistent_workers = dataloader_persistent_workers,
             dataloader_prefetch_factor = dataloader_prefetch_factor,
+            dataloader_multiprocessing_context = dataloader_multiprocessing_context,
+            dataloader_in_order = dataloader_in_order,
             remove_unused_columns = remove_unused_columns,
             label_names = label_names,
             train_sampling_strategy = train_sampling_strategy,
@@ -706,6 +713,7 @@ class UnslothPRMConfig(PRMConfig):
             ddp_find_unused_parameters = ddp_find_unused_parameters,
             ddp_bucket_cap_mb = ddp_bucket_cap_mb,
             ddp_broadcast_buffers = ddp_broadcast_buffers,
+            ddp_static_graph = ddp_static_graph,
             ddp_backend = ddp_backend,
             ddp_timeout = ddp_timeout,
             fsdp = fsdp,
@@ -717,8 +725,6 @@ class UnslothPRMConfig(PRMConfig):
             do_eval = do_eval,
             do_predict = do_predict,
             resume_from_checkpoint = resume_from_checkpoint,
-            warmup_ratio = warmup_ratio,
-            logging_dir = logging_dir,
             local_rank = local_rank,
             max_length = max_length,
             max_prompt_length = max_prompt_length,
