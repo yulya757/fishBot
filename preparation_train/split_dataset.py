@@ -5,7 +5,7 @@
 import json
 import random
 
-INP = "dataset.jsonl"
+INP = "dataset_with_tools.jsonl"
 TRAIN_OUT = "train_v2.jsonl"
 VAL_OUT = "val_v2.jsonl"
 
