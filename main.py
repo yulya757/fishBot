@@ -11,6 +11,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.enums import ChatAction
 import database
 from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND, LOCAL_MODEL_URL
+from typo_utils import apply_keyboard_typo
 from datetime import datetime, timedelta
 import random
 
@@ -26,6 +27,14 @@ USER_PENDING_RETURN = {}       # {chat_id: "activity_name"} - откуда бо�
 LAST_OUR_MESSAGE_TIME = {}     # {chat_id: datetime} - когда мы писали в последний раз
 LAST_OUR_MESSAGE_ID = {}       # {chat_id: int} - id последнего отправленного нами сообщения
 LAST_USER_MESSAGE_TIME = {}    # {chat_id: datetime} - когда юзер писал в последний раз
+
+# Плановые "живые" опечатки с самоисправлением
+PENDING_TYPO_CHATS = set()                        # чаты, которым на следующей отправке нужно вставить опечатку
+TYPO_DAILY_STATE = {"date": None, "quota": 0, "used": 0}
+LAST_TYPO_EVENT_AT = None                         # datetime последнего события, для антикластеризации
+TYPO_ACTIVE_WINDOW_MIN = 20   # сообщения должны идти плотно в пределах этого окна
+TYPO_MIN_STREAK = 7           # минимум сообщений подряд для "активного диалога"
+TYPO_COOLDOWN_MIN = 90        # не чаще одного события за это время
 
 # Инициализируем бота и диспетчер (aiogram)
 bot = Bot(token=BOT_TOKEN)
@@ -195,20 +204,44 @@ async def split_and_send_messages(chat_id: int, text: str, biz_conn_id: str, rep
     """Разделяет текст и отправляет от лица бизнес-аккаунта с имитацией набора текста."""
     parts = [p.strip() for p in text.split('\n') if p.strip()]
     if not parts or (len(parts) == 1 and len(parts[0]) < 50):
-        parts = [text] 
+        parts = [text]
+
+    # Плановая "живая" опечатка: событие списывается сразу, чтобы не сработать повторно
+    do_typo = chat_id in PENDING_TYPO_CHATS
+    PENDING_TYPO_CHATS.discard(chat_id)
+    typo_part_index = None
+    if do_typo:
+        for i, part in enumerate(parts):
+            if len(part) >= 12:
+                typo_part_index = i
+                break
 
     for i, part in enumerate(parts):
         if not part:
             continue
-        
+
         # Передаем business_connection_id, чтобы печатать от имени личного аккаунта
         await bot.send_chat_action(chat_id, ChatAction.TYPING, business_connection_id=biz_conn_id)
         await asyncio.sleep(len(part) * 0.1) # Задержка, зависящая от длины текста
-        
+
+        send_text = part
+        if i == typo_part_index:
+            typo_text, original_text = apply_keyboard_typo(part)
+            if typo_text != original_text:
+                send_text = typo_text
+
         if i == 0 and reply_to_msg_id:
-            await bot.send_message(chat_id, part, business_connection_id=biz_conn_id, reply_to_message_id=reply_to_msg_id)
+            sent_msg = await bot.send_message(chat_id, send_text, business_connection_id=biz_conn_id, reply_to_message_id=reply_to_msg_id)
         else:
-            await bot.send_message(chat_id, part, business_connection_id=biz_conn_id)
+            sent_msg = await bot.send_message(chat_id, send_text, business_connection_id=biz_conn_id)
+
+        LAST_OUR_MESSAGE_ID[chat_id] = sent_msg.message_id
+
+        if i == typo_part_index and send_text != part:
+            await asyncio.sleep(random.uniform(1.5, 4.0))
+            await bot.edit_message_text(
+                text=part, chat_id=chat_id, message_id=sent_msg.message_id, business_connection_id=biz_conn_id
+            )
 
 async def process_user_message_buffer(chat_id: int):
     global USER_MESSAGE_BUFFERS, USER_MESSAGE_TASKS, USER_BUSY_UNTIL, LAST_OUR_MESSAGE_TIME
@@ -321,6 +354,19 @@ async def summarize_command(message: types.Message, command: CommandObject):
     await message.answer(f"Начинаю суммировать чат {chat_id_str}...")
     await generate_and_save_summary(int(chat_id_str))
     await message.answer("Сводка обновлена!")
+
+@dp.message(Command("forcetypo"))
+async def force_typo_command(message: types.Message, command: CommandObject):
+    """Ручной тест механизма опечаток: ставит чат в очередь без ожидания реальных условий."""
+    if message.from_user.id != ADMIN_ID:
+        return
+    chat_id_str = command.args
+    if not chat_id_str:
+        await message.answer("Используй `/forcetypo <ID_ЧАТА>`.")
+        return
+    target_chat_id = int(chat_id_str)
+    PENDING_TYPO_CHATS.add(target_chat_id)
+    await message.answer(f"Опечатка запланирована для чата {target_chat_id} на следующую отправку.")
 
 
 # --- ОБРАБОТЧИК БИЗНЕС-СООБЩЕНИЙ (РЕЖИМ СЕКРЕТАРЯ) ---
@@ -472,6 +518,52 @@ async def initiative_worker():
                     print(f"Инициатива: Проверка тишины (1 час) для {chat_id}")
                     await trigger_proactive_ai(chat_id, prompt_injection)
 
+
+def is_active_streak(rows, window_minutes: float, min_count: int) -> bool:
+    """True, если в выборке есть min_count+ сообщений, уместившихся в window_minutes минут."""
+    if len(rows) < min_count:
+        return False
+
+    first_ts = rows[0][2]
+    last_ts = rows[-1][2]
+    if isinstance(first_ts, str):
+        first_ts = datetime.strptime(first_ts, "%Y-%m-%d %H:%M:%S")
+    if isinstance(last_ts, str):
+        last_ts = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
+
+    return (last_ts - first_ts).total_seconds() <= window_minutes * 60
+
+
+async def typo_scheduler_worker():
+    """Фоновый цикл: 2-3 раза в день ловит активный диалог и планирует "живую" опечатку."""
+    global LAST_TYPO_EVENT_AT
+    while True:
+        await asyncio.sleep(300)  # проверка раз в 5 минут
+        now = datetime.now()
+
+        if TYPO_DAILY_STATE["date"] != now.date():
+            TYPO_DAILY_STATE["date"] = now.date()
+            TYPO_DAILY_STATE["quota"] = random.randint(2, 3)
+            TYPO_DAILY_STATE["used"] = 0
+
+        if TYPO_DAILY_STATE["used"] >= TYPO_DAILY_STATE["quota"]:
+            continue
+        if LAST_TYPO_EVENT_AT and (now - LAST_TYPO_EVENT_AT).total_seconds() < TYPO_COOLDOWN_MIN * 60:
+            continue
+
+        candidates = []
+        for chat_id in list(ALLOWED_CHATS_CACHE):
+            recent = database.get_recent_messages_with_time(chat_id, limit=TYPO_MIN_STREAK)
+            if is_active_streak(recent, window_minutes=TYPO_ACTIVE_WINDOW_MIN, min_count=TYPO_MIN_STREAK):
+                candidates.append(chat_id)
+
+        if candidates:
+            chosen = random.choice(candidates)
+            PENDING_TYPO_CHATS.add(chosen)
+            TYPO_DAILY_STATE["used"] += 1
+            LAST_TYPO_EVENT_AT = now
+            print(f"Опечатка запланирована для чата {chosen} ({TYPO_DAILY_STATE['used']}/{TYPO_DAILY_STATE['quota']} за сегодня).")
+
 # --- ЗАПУСК БОТА ---
 
 WSL_DISTRO = "Ubuntu-22.04"
@@ -534,6 +626,7 @@ async def main():
 
     # ЗАПУСКАЕМ ФОНОВУЮ ИНИЦИАТИВУ
     asyncio.create_task(initiative_worker())
+    asyncio.create_task(typo_scheduler_worker())
 
     print(f"Бот успешно запущен в режиме Telegram Business. Инференс: {INFERENCE_BACKEND}.")
     try:

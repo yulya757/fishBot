@@ -61,6 +61,19 @@ def get_recent_messages(chat_id, limit=8):
     conn.close()
     return messages
 
+def get_recent_messages_with_time(chat_id, limit=8):
+    """Достает последние N сообщений вместе с timestamp (нужно для проверки плотности переписки)."""
+    conn = sqlite3.connect('memory.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT sender, text, timestamp FROM messages
+        WHERE chat_id = ? AND deleted = 0
+        ORDER BY timestamp DESC LIMIT ?
+    ''', (chat_id, limit))
+    messages = cursor.fetchall()[::-1]
+    conn.close()
+    return messages
+
 def update_message_text_by_tg_id(chat_id, tg_message_id, new_text):
     """Правит текст уже сохраненного сообщения при получении edited_business_message."""
     conn = sqlite3.connect('memory.db')
