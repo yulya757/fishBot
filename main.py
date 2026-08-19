@@ -212,20 +212,22 @@ async def split_and_send_messages(chat_id: int, text: str, biz_conn_id: str, rep
 async def process_user_message_buffer(chat_id: int):
     global USER_MESSAGE_BUFFERS, USER_MESSAGE_TASKS, USER_BUSY_UNTIL, LAST_OUR_MESSAGE_TIME
 
-    if chat_id not in USER_MESSAGE_BUFFERS or not USER_MESSAGE_BUFFERS[chat_id]["text"]:
+    if chat_id not in USER_MESSAGE_BUFFERS or not USER_MESSAGE_BUFFERS[chat_id]["parts"]:
         return
 
     buffer_data = USER_MESSAGE_BUFFERS.pop(chat_id)
-    user_full_text = buffer_data["text"].strip()
+    parts = buffer_data["parts"]
+    user_full_text = " ".join(p["text"] for p in parts).strip()
     biz_conn_id = buffer_data["business_connection_id"]
-    original_message_id = buffer_data["message_id"]
+    original_message_id = parts[0]["message_id"]
 
     now = datetime.now()
 
     # 1. ПРОВЕРКА НА СОН/ЗАНЯТОСТЬ
     if chat_id in USER_BUSY_UNTIL and now < USER_BUSY_UNTIL[chat_id]:
         print(f"Девушка занята до {USER_BUSY_UNTIL[chat_id]}. Сообщение сохранено, но ответа пока не будет.")
-        database.save_message(chat_id, "user", user_full_text)
+        for part in parts:
+            database.save_message(chat_id, "user", part["text"], tg_message_id=part["message_id"])
         return # Просто сохраняем в БД и прерываем обработку!
 
     # 2. ДИНАМИЧЕСКИЕ ПАУЗЫ (Быстро в диалоге, медленно после молчания)
@@ -237,9 +239,10 @@ async def process_user_message_buffer(chat_id: int):
             delay = random.randint(180, 480)
             print(f"Диалог возобновлен. Ждем {delay} сек перед ответом...")
             await asyncio.sleep(delay)
-    
-    # Сохраняем в БД и получаем ответ ИИ
-    database.save_message(chat_id, "user", user_full_text)
+
+    # Сохраняем каждый кусочек отдельной строкой (точная привязка к tg_message_id) и получаем ответ ИИ
+    for part in parts:
+        database.save_message(chat_id, "user", part["text"], tg_message_id=part["message_id"])
     await bot.send_chat_action(chat_id, ChatAction.TYPING, business_connection_id=biz_conn_id)
     
     # Здесь нужно немного изменить get_ai_response, чтобы он мог возвращать вызовы функций!
@@ -347,17 +350,16 @@ async def handle_business_message(message: types.Message):
         user_text = f'[Ответ на сообщение: "{quoted_text}"] {user_text}'
 
     if chat_id not in ALLOWED_CHATS_CACHE:
-        return 
+        return
 
     if chat_id not in USER_MESSAGE_BUFFERS:
         USER_MESSAGE_BUFFERS[chat_id] = {
-            "text": "",
             "business_connection_id": message.business_connection_id,
-            "message_id": message.message_id
+            "parts": [],
         }
 
-    # Накапливаем текст с учетом нашей новой пометки
-    USER_MESSAGE_BUFFERS[chat_id]["text"] += " " + user_text
+    # Накапливаем кусочки, чтобы их можно было точечно патчить/удалять до сохранения в БД
+    USER_MESSAGE_BUFFERS[chat_id]["parts"].append({"message_id": message.message_id, "text": user_text})
 
     # Отменяем предыдущий таймер, если клиент продолжает писать
     if chat_id in USER_MESSAGE_TASKS and not USER_MESSAGE_TASKS[chat_id].done():
@@ -366,17 +368,20 @@ async def handle_business_message(message: types.Message):
     async def _debounce_timer():
         try:
             await asyncio.sleep(DEBOUNCE_TIME)
-            
+
             # Эвристика: проверяем, завершена ли мысль (точки, вопросы, восклицательные знаки)
-            last_part = USER_MESSAGE_BUFFERS[chat_id]["text"].strip().split()[-1] if USER_MESSAGE_BUFFERS[chat_id]["text"] else ""
-            if last_part.endswith((".", "?", "!")) and len(USER_MESSAGE_BUFFERS[chat_id]["text"]) > 20:
+            parts = USER_MESSAGE_BUFFERS[chat_id]["parts"]
+            last_text = parts[-1]["text"] if parts else ""
+            last_part = last_text.strip().split()[-1] if last_text else ""
+            total_len = sum(len(p["text"]) for p in parts)
+            if last_part.endswith((".", "?", "!")) and total_len > 20:
                 await process_user_message_buffer(chat_id)
                 return
 
             # Если мысль кажется незавершенной, ждем до MAX_WAIT_TIME
             await asyncio.sleep(MAX_WAIT_TIME - DEBOUNCE_TIME)
             await process_user_message_buffer(chat_id)
-            
+
         except asyncio.CancelledError:
             pass # Таймер отменен, так как пришло новое сообщение
         except Exception as e:
@@ -384,6 +389,35 @@ async def handle_business_message(message: types.Message):
 
     # Запускаем новый таймер ожидания
     USER_MESSAGE_TASKS[chat_id] = asyncio.create_task(_debounce_timer())
+
+
+@dp.edited_business_message(F.text)
+async def handle_edited_business_message(message: types.Message):
+    """Ловит правки уже отправленных собеседником (или нами) сообщений."""
+    chat_id = message.chat.id
+    tg_id = message.message_id
+    new_text = message.text
+
+    buf = USER_MESSAGE_BUFFERS.get(chat_id)
+    if buf:
+        for part in buf["parts"]:
+            if part["message_id"] == tg_id:
+                part["text"] = new_text
+                return  # ещё не сохранено в БД, патчим на месте
+
+    # Сообщение уже улетело в БД и, возможно, уже было отвечено — правим историю для следующего хода ИИ
+    database.update_message_text_by_tg_id(chat_id, tg_id, new_text)
+
+
+@dp.deleted_business_messages()
+async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted):
+    """Ловит удаление сообщений собеседником и убирает их из буфера/БД."""
+    chat_id = event.chat.id
+    buf = USER_MESSAGE_BUFFERS.get(chat_id)
+    for tg_id in event.message_ids:
+        if buf:
+            buf["parts"] = [p for p in buf["parts"] if p["message_id"] != tg_id]
+        database.mark_message_deleted(chat_id, tg_id)
 
 
 async def initiative_worker():

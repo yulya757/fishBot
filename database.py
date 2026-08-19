@@ -24,16 +24,26 @@ def init_db():
             status TEXT DEFAULT 'новый'
         )
     ''')
-    
+
+    # Миграция: колонки для отслеживания правок/удалений сообщений собеседника
+    try:
+        cursor.execute('ALTER TABLE messages ADD COLUMN tg_message_id INTEGER')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE messages ADD COLUMN deleted INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
-def save_message(chat_id, sender, text):
+def save_message(chat_id, sender, text, tg_message_id=None):
     """Сохраняет новое сообщение в базу."""
     conn = sqlite3.connect('memory.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO messages (chat_id, sender, text) VALUES (?, ?, ?)', 
-                   (chat_id, sender, text))
+    cursor.execute('INSERT INTO messages (chat_id, sender, text, tg_message_id) VALUES (?, ?, ?, ?)',
+                   (chat_id, sender, text, tg_message_id))
     conn.commit()
     conn.close()
 
@@ -42,14 +52,34 @@ def get_recent_messages(chat_id, limit=8):
     conn = sqlite3.connect('memory.db')
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT sender, text FROM messages 
-        WHERE chat_id = ? 
+        SELECT sender, text FROM messages
+        WHERE chat_id = ? AND deleted = 0
         ORDER BY timestamp DESC LIMIT ?
     ''', (chat_id, limit))
     # Переворачиваем, чтобы старые были сверху
-    messages = cursor.fetchall()[::-1] 
+    messages = cursor.fetchall()[::-1]
     conn.close()
     return messages
+
+def update_message_text_by_tg_id(chat_id, tg_message_id, new_text):
+    """Правит текст уже сохраненного сообщения при получении edited_business_message."""
+    conn = sqlite3.connect('memory.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE messages SET text = ? WHERE chat_id = ? AND tg_message_id = ? AND sender = 'user'
+    ''', (new_text, chat_id, tg_message_id))
+    conn.commit()
+    conn.close()
+
+def mark_message_deleted(chat_id, tg_message_id):
+    """Помечает сообщение удаленным при получении deleted_business_messages."""
+    conn = sqlite3.connect('memory.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE messages SET deleted = 1 WHERE chat_id = ? AND tg_message_id = ?
+    ''', (chat_id, tg_message_id))
+    conn.commit()
+    conn.close()
 
 def update_profile_summary(chat_id, summary):
     """Обновляет сводку профиля для данного чата."""
