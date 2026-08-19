@@ -66,7 +66,7 @@ def update_message_text_by_tg_id(chat_id, tg_message_id, new_text):
     conn = sqlite3.connect('memory.db')
     cursor = conn.cursor()
     cursor.execute('''
-        UPDATE messages SET text = ? WHERE chat_id = ? AND tg_message_id = ? AND sender = 'user'
+        UPDATE messages SET text = ? WHERE chat_id = ? AND tg_message_id = ?
     ''', (new_text, chat_id, tg_message_id))
     conn.commit()
     conn.close()

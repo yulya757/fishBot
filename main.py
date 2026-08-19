@@ -24,6 +24,7 @@ ALLOWED_CHATS_CACHE = set()
 USER_BUSY_UNTIL = {}           # {chat_id: datetime} - до скольки бот занят
 USER_PENDING_RETURN = {}       # {chat_id: "activity_name"} - откуда бот должен вернуться
 LAST_OUR_MESSAGE_TIME = {}     # {chat_id: datetime} - когда мы писали в последний раз
+LAST_OUR_MESSAGE_ID = {}       # {chat_id: int} - id последнего отправленного нами сообщения
 LAST_USER_MESSAGE_TIME = {}    # {chat_id: datetime} - когда юзер писал в последний раз
 
 # Инициализируем бота и диспетчер (aiogram)
@@ -327,10 +328,26 @@ async def summarize_command(message: types.Message, command: CommandObject):
 @dp.business_message(F.text)
 async def handle_business_message(message: types.Message):
     """Слушает сообщения, поступающие на твой личный Telegram-аккаунт."""
-    
-    # Игнорируем твои собственные исходящие сообщения, чтобы бот не отвечал сам себе
+
+    # Владелец аккаунта написал сам (вручную вмешался в разговор) — не отвечаем ИИ поверх,
+    # но учитываем его сообщение в истории и таймерах.
     if message.from_user.id == ADMIN_ID:
-        return 
+        chat_id = message.chat.id
+
+        # Владелец уже взял разговор на себя — автоответ ИИ по старым сообщениям клиента не нужен
+        if chat_id in USER_MESSAGE_TASKS and not USER_MESSAGE_TASKS[chat_id].done():
+            USER_MESSAGE_TASKS[chat_id].cancel()
+
+        # Сохраняем еще не улетевшие в БД куски от клиента, но без ответа ИИ на них
+        buf = USER_MESSAGE_BUFFERS.pop(chat_id, None)
+        if buf:
+            for part in buf["parts"]:
+                database.save_message(chat_id, "user", part["text"], tg_message_id=part["message_id"])
+
+        database.save_message(chat_id, "me", message.text, tg_message_id=message.message_id)
+        LAST_OUR_MESSAGE_TIME[chat_id] = datetime.now()
+        LAST_OUR_MESSAGE_ID[chat_id] = message.message_id
+        return
 
     chat_id = message.chat.id
     biz_conn_id = message.business_connection_id
