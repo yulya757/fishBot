@@ -46,21 +46,58 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "update_profile_data",
-            "description": "Обновляет сводку беседы и статус готовности клиента к покупке.",
+            "description": "Обновляет структурированный профиль клиента (факты, боли, рекомендации) и статус готовности к покупке.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "Краткая сводка беседы с клиентом (1-2 предложения)."
+                        "description": "Краткая сводка беседы с клиентом (2-3 предложения)."
                     },
                     "status": {
                         "type": "string",
                         "enum": ["new", "cold", "warm", "ready", "rejected"],
                         "description": "Текущий статус готовности клиента к покупке."
+                    },
+                    "name": {
+                        "type": ["string", "null"],
+                        "description": "Имя собеседника, если было явно озвучено."
+                    },
+                    "age": {
+                        "type": ["integer", "null"],
+                        "description": "Возраст собеседника, если был явно озвучен."
+                    },
+                    "location": {
+                        "type": ["string", "null"],
+                        "description": "Город/страна собеседника, если известны."
+                    },
+                    "occupation": {
+                        "type": ["string", "null"],
+                        "description": "Род занятий/работа собеседника, если известны."
+                    },
+                    "financial_status": {
+                        "type": ["string", "null"],
+                        "description": "Краткая оценка уровня дохода и отношения к деньгам."
+                    },
+                    "pain_points": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Финансовые и личные боли собеседника. Пустой массив, если ничего не выявлено."
+                    },
+                    "personal_facts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Бытовые факты о собеседнике (машина, животные, хобби и т.д.). Пустой массив, если ничего не выявлено."
+                    },
+                    "next_suggested_topic": {
+                        "type": ["string", "null"],
+                        "description": "Рекомендация, какую тему поднять в следующем сообщении."
                     }
                 },
-                "required": ["summary", "status"],
+                "required": [
+                    "summary", "status", "name", "age", "location", "occupation",
+                    "financial_status", "pain_points", "personal_facts", "next_suggested_topic"
+                ],
                 "additionalProperties": False  # Для использования с strict=True
             },
             "strict": True
