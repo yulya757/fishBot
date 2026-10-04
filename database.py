@@ -93,9 +93,11 @@ def get_recent_messages(chat_id, limit=15):
     cursor.execute('''
         SELECT sender, text FROM messages
         WHERE chat_id = ? AND deleted = 0
-        ORDER BY timestamp DESC LIMIT ?
+        ORDER BY id DESC LIMIT ?
     ''', (chat_id, limit))
-    # Переворачиваем, чтобы старые были сверху
+    # Переворачиваем, чтобы старые были сверху. Сортируем по id, а не по timestamp —
+    # у timestamp точность до секунды, и несколько сообщений, сохраненных в одну секунду
+    # (обычное дело в цикле сохранения кусочков), иначе перемешиваются в случайном порядке.
     messages = cursor.fetchall()[::-1]
     conn.close()
     return messages
@@ -107,7 +109,7 @@ def get_recent_messages_with_time(chat_id, limit=8):
     cursor.execute('''
         SELECT sender, text, timestamp FROM messages
         WHERE chat_id = ? AND deleted = 0
-        ORDER BY timestamp DESC LIMIT ?
+        ORDER BY id DESC LIMIT ?
     ''', (chat_id, limit))
     messages = cursor.fetchall()[::-1]
     conn.close()

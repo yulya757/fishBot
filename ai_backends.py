@@ -131,6 +131,25 @@ TOOLS = [
 ]
 
 
+# Prompt caching (OpenAI): один стабильный ключ для всех обычных чат-запросов, так как
+# у них общий статичный system-промпт (SYSTEM_PROMPT) — чем чаще OpenAI видит один и тот
+# же ключ, тем выше шанс попадания в кеш. retention="24h" продлевает жизнь кеша на сутки
+# вместо дефолтных минут — иначе он остывает за долгие паузы между сообщениями
+# (initiative_worker иногда молчит часами).
+PROMPT_CACHE_KEY_CHAT = "fishbot-chat-v1"
+PROMPT_CACHE_RETENTION = "24h"
+
+
+def log_prompt_cache_usage(label: str, usage):
+    """Печатает в терминал долю промпта, взятую из кеша — чтобы видеть, что prompt
+    caching реально срабатывает, а не просто передается параметром."""
+    if not usage:
+        return
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0) or 0
+    print(f"[CACHE] {label}: cached_tokens={cached}/{usage.prompt_tokens} prompt_tokens")
+
+
 async def decide_tools(messages_for_ai):
     """Решает, нужно ли вызвать change_activity/update_profile_data. Сейчас всегда через OpenAI —
     после теста на GPU-железе может стать диспетчером по бэкенду, как generate_reply()."""
@@ -139,7 +158,10 @@ async def decide_tools(messages_for_ai):
         messages=messages_for_ai,
         tools=TOOLS,
         max_tokens=60,
+        prompt_cache_key=PROMPT_CACHE_KEY_CHAT,
+        prompt_cache_retention=PROMPT_CACHE_RETENTION,
     )
+    log_prompt_cache_usage("decide_tools", response.usage)
     return response.choices[0].message.tool_calls
 
 
@@ -149,7 +171,10 @@ async def generate_reply_openai(messages_for_ai):
         messages=messages_for_ai,
         tools=TOOLS,
         max_tokens=150,
+        prompt_cache_key=PROMPT_CACHE_KEY_CHAT,
+        prompt_cache_retention=PROMPT_CACHE_RETENTION,
     )
+    log_prompt_cache_usage("generate_reply_openai", response.usage)
     msg = response.choices[0].message
     return msg.content, msg.tool_calls
 

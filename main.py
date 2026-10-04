@@ -13,7 +13,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ChatAction
 import database
-from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND, LOCAL_MODEL_URL
+from ai_backends import ai_client, TOOLS, generate_reply, INFERENCE_BACKEND, LOCAL_MODEL_URL, log_prompt_cache_usage
 from typo_utils import apply_keyboard_typo
 from datetime import datetime, timedelta
 import random
@@ -40,7 +40,8 @@ TYPO_MIN_STREAK = 7           # минимум сообщений подряд �
 TYPO_COOLDOWN_MIN = 90        # не чаще одного события за это время
 
 # Админ-панель на инлайн-кнопках
-ADMIN_STATE = {"waiting_username": False, "waiting_chat_id": False}   # ждем ли текстовый ввод (поиск / ручной chat_id)
+ADMIN_STATE = {"waiting_username": False, "waiting_chat_id": False, "waiting_media_reply": None}
+# waiting_media_reply = None либо {"chat_id":, "media_msg_id":} — ждем текст ответа на медиа клиента
 CONTACTS_PAGE_SIZE = 8
 ADMIN_ADD_SELECTION = set()                 # chat_id'ы, отмеченные в мультивыборе "Добавить чат"
 ADMIN_LOG_VIEW = {"chat_id": None, "message_ids": []}  # временные сообщения лога — удаляются при закрытии
@@ -82,6 +83,20 @@ def track_message_for_summary(chat_id: int):
         asyncio.create_task(generate_and_save_summary(chat_id))
     else:
         MESSAGE_COUNT_SINCE_SUMMARY[chat_id] = count
+
+async def mark_business_message_read(chat_id: int, message_id: int):
+    """Отмечает сообщение (и все, что до него) прочитанным от лица бизнес-аккаунта.
+    Без этого у клиента в Telegram не появляется статус "прочитано", пока кто-то
+    не откроет этот чат вручную с телефона/десктопа."""
+    biz_conn_id = database.get_biz_conn_id(chat_id)
+    if not biz_conn_id:
+        return
+    try:
+        await bot.read_business_message(business_connection_id=biz_conn_id, chat_id=chat_id, message_id=message_id)
+    except Exception:
+        print(f"[READ] Не удалось отметить прочитанным chat_id={chat_id} message_id={message_id}:")
+        traceback.print_exc()
+
 
 def admin_close_keyboard() -> types.InlineKeyboardMarkup:
     """Кнопка для закрытия (удаления) одноразовых служебных сообщений админу."""
@@ -137,6 +152,13 @@ async def trigger_proactive_ai(chat_id: int, context_prompt: str):
         {"role": "assistant" if msg[0] == "me" else "user", "content": msg[1]}
         for msg in recent_msgs
     ]
+    # Инициатива срабатывает, когда собеседник молчит — значит хвост истории часто состоит
+    # из НАШИХ ЖЕ реплик без ответа. Список сообщений без завершающего хода юзера сбивает
+    # модель, и она вместо нового сообщения просто повторяет/продолжает свою последнюю
+    # реплику. Обрезаем висящие assistant-реплики с конца, чтобы контекст либо кончался
+    # на юзере, либо был пустым — тогда модель честно пишет что-то новое по инструкции.
+    while history_pairs and history_pairs[-1]["role"] == "assistant":
+        history_pairs.pop()
     messages_for_ai = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + dynamic_extra}] + history_pairs
 
     try:
@@ -201,9 +223,12 @@ async def generate_and_save_summary(chat_id: int):
             model="gpt-4o",
             messages=messages_for_ai,
             tools=TOOLS,
-            tool_choice={"type": "function", "function": {"name": "update_profile_data"}}
+            tool_choice={"type": "function", "function": {"name": "update_profile_data"}},
+            prompt_cache_key="fishbot-summary-v1",  # отдельный ключ: другой статичный промпт (summary_prompt.txt)
+            prompt_cache_retention="24h",
         )
-        
+        log_prompt_cache_usage("generate_and_save_summary", response.usage)
+
         response_message = response.choices[0].message
         tool_calls = response_message.tool_calls
 
@@ -394,6 +419,9 @@ async def process_user_message_buffer(chat_id: int):
         database.save_message(chat_id, "user", part["text"], tg_message_id=part["message_id"])
         track_message_for_summary(chat_id)
     print(f"[BUFFER] {chat_id}: сообщения сохранены в БД, запрашиваю ответ ИИ (backend={INFERENCE_BACKEND})...")
+    # Отмечаем прочитанным перед тем, как "начать печатать" — иначе у клиента никогда
+    # не появится галочка "прочитано", пока он сам не откроет чат
+    await mark_business_message_read(chat_id, parts[-1]["message_id"])
     await bot.send_chat_action(chat_id, ChatAction.TYPING, business_connection_id=biz_conn_id)
 
     # Здесь нужно немного изменить get_ai_response, чтобы он мог возвращать вызовы функций!
@@ -916,6 +944,26 @@ async def admin_search_input(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
 
+    media_reply = ADMIN_STATE["waiting_media_reply"]
+    if media_reply:
+        ADMIN_STATE["waiting_media_reply"] = None
+        chat_id = media_reply["chat_id"]
+        media_msg_id = media_reply["media_msg_id"]
+        biz_conn_id = database.get_biz_conn_id(chat_id)
+        if not biz_conn_id:
+            await message.answer("Не могу отправить: нет business_connection_id для этого чата.", reply_markup=admin_close_keyboard())
+            return
+
+        await mark_business_message_read(chat_id, media_msg_id)
+        reply_text = message.text
+        database.save_message(chat_id, "me", reply_text)
+        track_message_for_summary(chat_id)
+        await split_and_send_messages(chat_id, reply_text, biz_conn_id, reply_to_msg_id=media_msg_id)
+        LAST_OUR_MESSAGE_TIME[chat_id] = datetime.now()
+        database.log_activity(chat_id, "Админ ответил на медиа клиента")
+        await message.answer("✅ Отправлено клиенту.", reply_markup=admin_close_keyboard())
+        return
+
     if ADMIN_STATE["waiting_chat_id"]:
         ADMIN_STATE["waiting_chat_id"] = False
         raw = message.text.strip()
@@ -1067,6 +1115,139 @@ async def _handle_business_message_impl(message: types.Message):
     # Запускаем новый таймер ожидания
     USER_MESSAGE_TASKS[chat_id] = asyncio.create_task(_debounce_timer())
     print(f"[BUSINESS_MSG] {chat_id}: новый таймер дебаунса запущен")
+
+
+def media_type_label(message: types.Message) -> str:
+    """Короткая текстовая подпись медиа — и для истории/ИИ, и для уведомления админу."""
+    if message.photo:
+        return "[фото]"
+    if message.voice:
+        return "[голосовое]"
+    if message.video_note:
+        return "[кружок]"
+    if message.sticker:
+        emoji = (message.sticker.emoji or "").strip()
+        return f"[стикер {emoji}]" if emoji else "[стикер]"
+    if message.animation:
+        return "[гифка]"
+    if message.video:
+        return "[видео]"
+    if message.audio:
+        return "[аудио]"
+    if message.document:
+        return "[файл]"
+    return "[медиа]"
+
+
+async def send_media_copy_to_admin(message: types.Message):
+    """Шлет админу копию медиа тем же file_id (не форвард — без пометки 'Forwarded from')."""
+    caption = message.caption or None
+    if message.photo:
+        return await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption)
+    if message.voice:
+        return await bot.send_voice(ADMIN_ID, message.voice.file_id, caption=caption)
+    if message.video_note:
+        return await bot.send_video_note(ADMIN_ID, message.video_note.file_id)
+    if message.video:
+        return await bot.send_video(ADMIN_ID, message.video.file_id, caption=caption)
+    if message.animation:
+        return await bot.send_animation(ADMIN_ID, message.animation.file_id, caption=caption)
+    if message.sticker:
+        return await bot.send_sticker(ADMIN_ID, message.sticker.file_id)
+    if message.audio:
+        return await bot.send_audio(ADMIN_ID, message.audio.file_id, caption=caption)
+    if message.document:
+        return await bot.send_document(ADMIN_ID, message.document.file_id, caption=caption)
+    return None
+
+
+@dp.business_message(F.photo | F.voice | F.video_note | F.video | F.document | F.animation | F.sticker | F.audio)
+async def handle_business_media(message: types.Message):
+    """Медиа от клиента (фото/ГС/кружок/видео/...) — не отвечаем автоматически, а зовем админа:
+    копия медиа + контекст последних сообщений + кнопки 'Игнорировать'/'Ответить'. Сообщение не
+    отмечается прочитанным, пока админ не примет решение — см. mark_business_message_read."""
+    print(f"[BUSINESS_MEDIA] Апдейт получен: chat_id={message.chat.id}, from_user_id={message.from_user.id}, "
+          f"msg_id={message.message_id}, type={media_type_label(message)}")
+    try:
+        await _handle_business_media_impl(message)
+    except Exception:
+        print(f"[BUSINESS_MEDIA] !!! ИСКЛЮЧЕНИЕ при обработке chat_id={message.chat.id}:")
+        traceback.print_exc()
+
+
+async def _handle_business_media_impl(message: types.Message):
+    chat_id = message.chat.id
+    label = media_type_label(message)
+    database.save_biz_conn_id(chat_id, message.business_connection_id)
+
+    if message.from_user.id == ADMIN_ID:
+        # Сам владелец отправил медиа клиенту вручную — просто логируем, уведомление не нужно
+        database.upsert_known_contact(chat_id, message.chat.username, message.chat.first_name)
+        text_to_save = f"{label} {message.caption}".strip() if message.caption else label
+        database.save_message(chat_id, "me", text_to_save, tg_message_id=message.message_id)
+        track_message_for_summary(chat_id)
+        LAST_OUR_MESSAGE_TIME[chat_id] = datetime.now()
+        LAST_OUR_MESSAGE_ID[chat_id] = message.message_id
+        return
+
+    database.upsert_known_contact(chat_id, message.chat.username, message.chat.first_name)
+
+    if chat_id not in ALLOWED_CHATS_CACHE:
+        print(f"[BUSINESS_MEDIA] {chat_id}: чат не разрешен, медиа пропущено (как и с текстом)")
+        return
+
+    # Контекст — 5 сообщений, предшествовавших этому медиа
+    context_msgs = database.get_recent_messages(chat_id, limit=5)
+
+    # Сохраняем плейсхолдер в историю, чтобы ИИ в будущих ответах знал, что медиа было
+    text_to_save = f"{label} {message.caption}".strip() if message.caption else label
+    database.save_message(chat_id, "user", text_to_save, tg_message_id=message.message_id)
+    track_message_for_summary(chat_id)
+    database.log_activity(chat_id, f"Клиент отправил медиа: {label}")
+
+    contact = database.get_known_contact(chat_id)
+    contact_label = format_contact_label(chat_id, contact[1] if contact else None, contact[2] if contact else None)
+
+    context_lines = "\n".join(
+        f"{'Я' if sender == 'me' else contact_label}: {text}" for sender, text in context_msgs
+    ) or "(нет предыдущих сообщений)"
+    caption_note = f"\n\nПодпись к медиа: {message.caption}" if message.caption else ""
+    notif_text = (
+        f"📎 Медиа от {contact_label} ({label})\n\n"
+        f"Контекст (последние {len(context_msgs)} сообщ.):\n{context_lines}{caption_note}"
+    )
+
+    await send_media_copy_to_admin(message)
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
+        types.InlineKeyboardButton(text="🚫 Игнорировать", callback_data=f"mediaignore:{chat_id}:{message.message_id}"),
+        types.InlineKeyboardButton(text="✍️ Ответить", callback_data=f"mediareply:{chat_id}:{message.message_id}"),
+    ]])
+    await bot.send_message(ADMIN_ID, notif_text, reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("mediaignore:"))
+async def cb_media_ignore(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer()
+        return
+    _, chat_id_str, media_msg_id_str = callback.data.split(":")
+    chat_id, media_msg_id = int(chat_id_str), int(media_msg_id_str)
+    await mark_business_message_read(chat_id, media_msg_id)
+    database.log_activity(chat_id, "Админ проигнорировал медиа от клиента")
+    await safe_edit_text(callback.message, "🚫 Проигнорировано.", reply_markup=admin_close_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("mediareply:"))
+async def cb_media_reply(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer()
+        return
+    _, chat_id_str, media_msg_id_str = callback.data.split(":")
+    chat_id, media_msg_id = int(chat_id_str), int(media_msg_id_str)
+    ADMIN_STATE["waiting_media_reply"] = {"chat_id": chat_id, "media_msg_id": media_msg_id}
+    await callback.message.answer("Напиши ответ клиенту на это медиа.")
+    await callback.answer()
 
 
 @dp.edited_business_message(F.text)
