@@ -25,8 +25,8 @@ except ImportError:
         "  cp config.example.py config.py"
     )
 
-IN_PATH = "result.json"
-OUT_PATH = "dataset.jsonl"
+IN_PATH = "result_merged.json"
+OUT_PATH = "dataset1.jsonl"
 
 
 SESSION_GAP = 3 * 3600      # разрыв больше 3 часов = новый диалог
@@ -35,7 +35,7 @@ BURST_GAP = 300             # тот же автор после паузы >5 м
 MAX_TURN_MSGS = 6           # максимум сообщений в одном ходе (защита от простыней)
 MAX_MSG_LINES = 10          # сообщения-«пасты» (списки, логи, код) — не разговорный
 MAX_MSG_CHARS = 1200        # стиль, выкидываем целиком
-MAX_TURNS = 12               # максимум реплик (ходов) в одном примере
+MAX_TURNS = 10              # максимум реплик (ходов) в одном примере
 MAX_CHARS = 3000            # ограничение длины примера (~1000 токенов)
 MIN_MY_TURNS = 1            # в окне должна быть хотя бы одна моя реплика
 MIN_PARTNER_TURNS = 1       # и хотя бы одна реплика собеседника

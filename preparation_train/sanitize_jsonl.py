@@ -4,6 +4,11 @@ import json
 import re
 from collections import Counter
 
+import pymorphy3
+
+_MORPH = pymorphy3.MorphAnalyzer()
+_SINGLE_CYRILLIC_WORD_RE = re.compile(r'^[А-Яа-яЁё-]+$')
+
 # ---------- Regex patterns ----------
 EMAIL_RE = re.compile(r'(?i)\b[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}\b')
 PHONE_RE = re.compile(r'(?x)(?<!\w)(?:\+?\d{1,3}[\s\-()]*)?(?:\(?\d{2,4}\)?[\s\-()]*)?(?:\d[\s\-()]*){6,12}\d(?!\w)')
@@ -22,18 +27,111 @@ STRONG_PASSWORD_HINT_RE = re.compile(r'(?i)\b(?:вот\s+пароль|мой\s+�
 CARD_RE = re.compile(r'\b(?:\d[ -]*?){13,16}\b')
 
 # НОВОЕ: Словарь фактов для маскировки (заполни своими данными)
-FACTS_TO_MASK = {
-    "Настя": "<NAME>",
-    "169 см": "<HEIGHT>",
-    "169": "<HEIGHT>",
-    "Москва": "<CITY>",
-    "Сокольники": "<DISTRICT>",
-    "Хамовники": "<DISTRICT>",
-    "Электросталь": "<CITY>",
-    "Электросталью": "<CITY>",
-    "МФТИ": "<UNIVERSITY>",
-    "Информационная безопасность": "<SPECIALTY>"
-}
+FACTS_TO_MASK = [
+  {
+    "person": "Вика",
+    "age": None,
+    "height": None,
+    "university": None,
+    "native_city": "Казань",
+    "current_city": None,
+    "destination_city": None,
+    "districts": [],
+    "masked_data": {
+      "person": "<NAME>",
+      "age": None,
+      "height": None,
+      "university": None,
+      "native_city": "<NATIVE_CITY>",
+      "current_city": None,
+      "destination_city": None,
+      "districts": []
+    }
+  },
+  {
+    "person": "Лера",
+    "age": None,
+    "height": None,
+    "university": None,
+    "native_city": None,
+    "current_city": "Электросталь",
+    "destination_city": "Москва",
+    "districts": [],
+    "masked_data": {
+      "person": "<NAME>",
+      "age": None,
+      "height": None,
+      "university": None,
+      "native_city": None,
+      "current_city": "<CURRENT_CITY>",
+      "destination_city": "<DESTINATION_CITY>",
+      "districts": []
+    }
+  },
+  {
+    "person": "Настя",
+    "age": None,
+    "height": "169 см",
+    "university": "МФТИ",
+    "native_city": None,
+    "current_city": "Калининград",
+    "destination_city": "Москва",
+    "districts": ["Хамовники", "Сокольники"],
+    "masked_data": {
+      "person": "<NAME>",
+      "age": None,
+      "height": "<HEIGHT>",
+      "university": "<UNIVERSITY>",
+      "native_city": None,
+      "current_city": "<CURRENT_CITY>",
+      "destination_city": "<DESTINATION_CITY>",
+      "districts": ["<DISTRICT>", "<DISTRICT>"]
+    }
+  }
+]
+
+def _all_word_forms(word: str) -> set:
+    """Возвращает все словоформы (падежи/числа) одного слова через pymorphy3.
+    Не-словам (числа, фразы из нескольких слов, латиница и т.д.) морфология не
+    подходит — возвращают как есть, без изменений."""
+    word = word.strip()
+    if not word or not _SINGLE_CYRILLIC_WORD_RE.match(word):
+        return {word} if word else set()
+    parsed = _MORPH.parse(word)
+    if not parsed:
+        return {word}
+    forms = {word}
+    forms.update(f.word for f in parsed[0].lexeme)
+    return forms
+
+
+def _flatten_facts_to_mask(records):
+    """Строит плоский словарь {словоформа: маска} из структурированных записей
+    FACTS_TO_MASK (по одному человеку каждая, с parallel-полем masked_data).
+    Каждое реальное значение раскрывается во все свои падежные формы, чтобы
+    маскировались не только именительный падеж ("Казань"), но и "в Казани" и т.д."""
+    flat = {}
+    simple_fields = [
+        "person", "age", "height", "university",
+        "native_city", "current_city", "destination_city",
+    ]
+    for record in records:
+        masked = record.get("masked_data", {})
+        for field in simple_fields:
+            real = record.get(field)
+            mask = masked.get(field)
+            if real and mask:
+                for form in _all_word_forms(str(real)):
+                    flat[form] = mask
+        real_districts = record.get("districts") or []
+        masked_districts = masked.get("districts") or []
+        for real_d, mask_d in zip(real_districts, masked_districts):
+            if real_d and mask_d:
+                for form in _all_word_forms(str(real_d)):
+                    flat[form] = mask_d
+    return flat
+
+FACTS_TO_MASK_FLAT = _flatten_facts_to_mask(FACTS_TO_MASK)
 
 # ---------- Helpers ----------
 def _safe_replace(pattern: re.Pattern, text: str, repl: str, counter: Counter, key: str) -> str:
@@ -83,9 +181,11 @@ def sanitize_text(text: str, stats: Counter) -> str:
     text = _safe_replace(LONG_B64_RE, text, "<TOKEN>", stats, "long_b64")
     text = _safe_replace(PHONE_RE, text, "<PHONE>", stats, "phone")
 
-    # Маскировка личных фактов
-    for word, mask in FACTS_TO_MASK.items():
-        text = re.sub(rf'\b{word}\b', mask, text, flags=re.IGNORECASE)
+    # Маскировка личных фактов (имена, города, вуз, район и т.д.)
+    for word, mask in FACTS_TO_MASK_FLAT.items():
+        text, n = re.subn(rf'\b{re.escape(word)}\b', mask, text, flags=re.IGNORECASE)
+        if n:
+            stats["fact"] += n
 
     return text
 
@@ -119,8 +219,8 @@ if __name__ == "__main__":
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--in", dest="inp", default="dataset.jsonl", help="Input JSONL")
-    p.add_argument("--out", dest="out", default="dataset_sanitized.jsonl", help="Output JSONL")
+    p.add_argument("--in", dest="inp", default="dataset1.jsonl", help="Input JSONL")
+    p.add_argument("--out", dest="out", default="dataset_sanitized1.jsonl", help="Output JSONL")
     args = p.parse_args()
 
     stats = sanitize_jsonl(args.inp, args.out)
