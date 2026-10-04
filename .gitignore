@@ -12,3 +12,10 @@ venv/
 
 # Кэш питона
 __pycache__/
+
+# Логи выполнения (runtime-артефакты, не код)
+*.log
+
+# Веса обученных моделей и кэш компиляции unsloth — слишком большие для git
+preparation_train/lora_v2/
+preparation_train/unsloth_compiled_cache/
